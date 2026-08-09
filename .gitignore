@@ -1,0 +1,5 @@
+node_modules/
+*.exe
+*.zip
+.env
+.bdptest/

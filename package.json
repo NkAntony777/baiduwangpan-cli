@@ -1,0 +1,24 @@
+{
+  "name": "bdp",
+  "version": "1.0.0",
+  "description": "百度网盘 CLI — 全盘读写 + 免下载读取 + 群聊文件浏览 (Agent 友好)",
+  "main": "lib/index.js",
+  "bin": {
+    "bdp": "bin/bdp.js"
+  },
+  "scripts": {
+    "start": "node bin/bdp.js"
+  },
+  "engines": {
+    "node": ">=14"
+  },
+  "license": "MIT",
+  "keywords": [
+    "baidu",
+    "netdisk",
+    "pan",
+    "cli",
+    "agent",
+    "bduss"
+  ]
+}
