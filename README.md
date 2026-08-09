@@ -1,6 +1,6 @@
 <div align="center">
 
-# baiduyunpan-cli
+# baiduwangpan-cli
 
 **百度网盘 CLI — 全盘读写 · 免下载读取 · 群聊文件浏览**
 
@@ -8,6 +8,8 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D14-brightgreen)](https://nodejs.org)
+[![npm version](https://img.shields.io/npm/v/baiduwangpan-cli)](https://www.npmjs.com/package/baiduwangpan-cli)
+[![npm downloads](https://img.shields.io/npm/dm/baiduwangpan-cli)](https://www.npmjs.com/package/baiduwangpan-cli)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-blue)]()
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
@@ -47,12 +49,19 @@
 ### 1. 安装
 
 ```bash
-git clone https://github.com/NkAntony777/baiduyunpan-cli.git
-cd baiduyunpan-cli
-npm link  # 全局注册 bdp 命令
+npm install -g baiduwangpan-cli
 ```
 
-同时需要安装 [BaiduPCS-Go](https://github.com/qjfoidnh/BaiduPCS-Go)（全盘操作的底层引擎）和 `curl`（已在大多数系统预装）。
+安装时会**自动下载** BaiduPCS-Go 引擎（支持 GitHub 镜像加速，国内也能装）。也支持手动克隆：
+
+```bash
+git clone https://github.com/NkAntony777/baiduwangpan-cli.git
+cd baiduwangpan-cli
+npm install        # postinstall 自动下载引擎
+npm link           # 全局注册 bdp 命令
+```
+
+> **依赖**: Node.js 14+ 和 `curl`（已在 Windows 10+ / macOS / 大多数 Linux 预装）
 
 ### 2. 配置认证
 
@@ -150,7 +159,7 @@ bdp gsearch 539478953581833690 "倪海厦" --json
 ### 作为 Node.js 库使用
 
 ```javascript
-const { pan, group } = require('baiduyunpan-cli');
+const { pan, group } = require('baiduwangpan-cli');
 
 // 免下载读取文件
 const content = pan.cat('/文档/data.json');
@@ -221,7 +230,7 @@ bdp groups                          bdp gshares <gid>
 ## 📁 项目结构
 
 ```
-baiduyunpan-cli/
+baiduwangpan-cli/
 ├── package.json              # npm 配置 (bin: bdp)
 ├── bin/
 │   └── bdp.js                # CLI 入口 (统一命令解析)

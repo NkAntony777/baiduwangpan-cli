@@ -2,4 +2,5 @@ node_modules/
 *.exe
 *.zip
 .env
-.bdptest/
+.playwright-mcp/
+BaiduPCS-Go-v*/

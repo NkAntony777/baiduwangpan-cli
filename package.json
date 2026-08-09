@@ -1,13 +1,14 @@
 {
-  "name": "bdp",
+  "name": "baiduwangpan-cli",
   "version": "1.0.0",
-  "description": "百度网盘 CLI — 全盘读写 + 免下载读取 + 群聊文件浏览 (Agent 友好)",
+  "description": "百度网盘 CLI — 全盘读写 · 免下载读取文件内容 · 群聊文件浏览 (Agent 友好)",
   "main": "lib/index.js",
   "bin": {
     "bdp": "bin/bdp.js"
   },
   "scripts": {
-    "start": "node bin/bdp.js"
+    "start": "node bin/bdp.js",
+    "postinstall": "node scripts/postinstall.js"
   },
   "engines": {
     "node": ">=14"
@@ -19,6 +20,25 @@
     "pan",
     "cli",
     "agent",
-    "bduss"
-  ]
+    "bduss",
+    "baidupcs",
+    "baidu-pan",
+    "baiduyunpan",
+    "ai-agent",
+    "mcp"
+  ],
+  "files": [
+    "bin/",
+    "lib/",
+    "scripts/postinstall.js"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/NkAntony777/baiduwangpan-cli.git"
+  },
+  "homepage": "https://github.com/NkAntony777/baiduwangpan-cli",
+  "bugs": {
+    "url": "https://github.com/NkAntony777/baiduwangpan-cli/issues"
+  },
+  "author": "NkAntony777"
 }
