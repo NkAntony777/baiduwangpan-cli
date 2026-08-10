@@ -10,14 +10,11 @@ if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
 }
 Write-Host "✅ Node.js: $(node --version)" -ForegroundColor Green
 
-# 2. 安装 bdp
-if (Get-Command bdp -ErrorAction SilentlyContinue) {
-    Write-Host "✅ bdp 已安装" -ForegroundColor Green
-} else {
-    Write-Host "→ 安装 baiduwangpan-cli (全局)..." -ForegroundColor Yellow
-    npm install -g baiduwangpan-cli
-    Write-Host "✅ bdp 安装完成" -ForegroundColor Green
-}
+# 2. 安装或升级 bdp
+Write-Host "→ 安装/升级 baiduwangpan-cli (全局)..." -ForegroundColor Yellow
+npm install -g baiduwangpan-cli@latest
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+Write-Host "✅ bdp 已更新到最新版本" -ForegroundColor Green
 
 # 3. 检查 BaiduPCS-Go 引擎
 try {
@@ -38,7 +35,8 @@ if ($status.loggedIn) {
     Write-Host "✅ 已登录百度网盘" -ForegroundColor Green
 } else {
     Write-Host "⚠️  尚未配置凭证。" -ForegroundColor Yellow
-    Write-Host "   请运行: bdp login --bduss <BDUSS值> --stoken <STOKEN值>" -ForegroundColor Yellow
+    Write-Host "   请运行: bdp login" -ForegroundColor Yellow
+    Write-Host "   无 Chrome/Edge 时见 reference/authentication.md 使用手动凭证" -ForegroundColor Yellow
     Write-Host "   获取方法见 reference/authentication.md" -ForegroundColor Yellow
 }
 

@@ -65,19 +65,33 @@ npm link           # 全局注册 bdp 命令
 
 ### 2. 配置认证
 
+**方式一：浏览器自动登录（推荐）**
+
+```bash
+bdp login
+```
+
+自动启动 Chrome/Edge → 打开百度网盘登录页 → **手机扫码** → 在页面会话内验证登录 → 自动同步引擎。无需 F12。
+
+扫码产生的新会话可能被百度限制为只能在原浏览器上下文中使用。因此 `bdp` 会保留专用 profile，并在登录后将浏览器最小化；PCS API 继续使用 BDUSS/STOKEN，网页和群聊 API 通过该浏览器的 CDP 会话调用。浏览器被关闭后，下次网页 API 调用会使用同一 profile 自动重启。
+
+**方式二：手动凭证**
+
 ```bash
 bdp login --bduss <你的BDUSS> --stoken <你的STOKEN>
 bdp whoami  # 验证
 ```
 
 <details>
-<summary>📋 如何获取 BDUSS 和 STOKEN</summary>
+<summary>📋 如何获取 BDUSS 和 STOKEN（手动方式）</summary>
 
 1. 浏览器打开 [pan.baidu.com](https://pan.baidu.com) 并登录
 2. 按 `F12` → **Application** → **Cookies** → `https://pan.baidu.com`
 3. 找到 **BDUSS** 和 **STOKEN** 的值，复制
 
 > ⚠️ STOKEN 必须在百度网盘页面获取（不是百度首页），值中应包含大写字母。
+
+> 💡 推荐直接运行 `bdp login`，全程自动化，无需手动操作。
 
 </details>
 
@@ -183,7 +197,7 @@ const results = await group.searchFiles('539478953581833690', '倪海厦');
 │    lib/pan.js    │         lib/group.js             │
 │   全盘文件操作    │        群聊文件浏览               │
 ├──────────────────┼──────────────────────────────────┤
-│  BaiduPCS-Go     │     lib/http.js (curl)           │
+│  BaiduPCS-Go     │  lib/http.js (curl / browser)    │
 │  (BDUSS 认证)    │     mbox API (逆向)              │
 │  locate → dlink  │     /mbox/group/listshare        │
 │  upload/download │     /mbox/msg/shareinfo          │
@@ -237,9 +251,11 @@ baiduwangpan-cli/
 ├── lib/
 │   ├── index.js              # 库导出
 │   ├── config.js             # 配置管理 (~/.bdp/config.json)
-│   ├── http.js               # HTTP 客户端 (curl 封装)
+│   ├── http.js               # 网页 API 双传输 (curl / browser)
+│   ├── browser-login.js      # 浏览器登录、持久 profile 与 CDP 请求
 │   ├── pan.js                # 网盘操作 (BaiduPCS-Go 桥接)
 │   └── group.js              # 群聊操作 (逆向 mbox API)
+├── test/                     # Node.js 回归测试
 ├── skills/
 │   └── baiduwangpan/         # Agent Skill 源文件 (SKILL.md + reference + scripts)
 ├── baiduwangpan-skill.zip    # Agent Skill 打包 (Releases 附件)

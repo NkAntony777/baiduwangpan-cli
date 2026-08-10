@@ -1,18 +1,6 @@
 ---
 name: baiduwangpan
-description: 百度网盘 CLI 操作技能 — 基于 baiduwangpan-cli (bdp) 命令，支持全盘文件浏览/搜索/免下载读取内容/上传下载/群聊文件浏览。当用户要求查看、搜索、读取、上传、下载百度网盘文件，或浏览百度网盘群聊文件时使用。
-version: 1.0.0
-authors:
-  - NkAntony777
-credentials:
-  - name: BDP_BDUSS
-    required: false
-    description: "百度网盘 BDUSS cookie。也可通过 `bdp login` 配置保存到 ~/.bdp/config.json"
-    storage: "~/.bdp/config.json 或环境变量"
-  - name: BDP_STOKEN
-    required: false
-    description: "百度网盘 STOKEN cookie。也可通过 `bdp login` 配置保存到 ~/.bdp/config.json"
-    storage: "~/.bdp/config.json 或环境变量"
+description: 使用 baiduwangpan-cli (`bdp`) 操作百度网盘，包括浏览或搜索全盘文件、免下载读取内容、上传下载、文件管理，以及浏览和搜索百度网盘群聊文件。用户要求查看、搜索、读取、上传、下载或管理百度网盘及群聊文件时使用。
 ---
 
 ## Overview
@@ -42,9 +30,23 @@ bdp whoami --json
 ```
 
 - `loggedIn: true` → 继续
-- 未登录 → 提示用户运行 `bdp login --bduss <值> --stoken <值>`（见 reference/authentication.md）
+- 未登录 → 提示用户运行 `bdp login`；无 Chrome/Edge 时再使用手动凭证（见 reference/authentication.md）
 
 如果 `bdp` 命令不存在 → 运行安装脚本（见下）。
+
+## 登录（两种方式）
+
+**推荐：浏览器自动登录（扫码）**
+```bash
+bdp login
+```
+自动启动 Chrome/Edge → 打开登录页 → 用户手机扫码 → 在页面内验证网页 API → 同步引擎。浏览器登录后最小化，并继续承载网页与群聊 API。
+
+**备用：手动凭证**
+```bash
+bdp login --bduss <BDUSS值> --stoken <STOKEN值>
+```
+（获取方法见 reference/authentication.md）
 
 ## Recommended Entry Point
 
@@ -59,11 +61,11 @@ npm install -g baiduwangpan-cli
 安装时自动下载 BaiduPCS-Go 引擎（含 GitHub 镜像加速）。之后配置凭证：
 
 ```bash
-bdp login --bduss <BDUSS值> --stoken <STOKEN值>
+bdp login
 bdp whoami   # 验证
 ```
 
-> **安全**：BDUSS/STOKEN 是敏感凭证。配置后存放在 `~/.bdp/config.json`。Agent 不得打印、输出或回显配置文件中凭证的完整内容。
+> **安全**：BDUSS/STOKEN 是敏感凭证。配置后存放在 `~/.bdp/config.json`。扫码登录的 `~/.bdp/browser-profile` 同样含有效登录状态。Agent 不得打印、输出或回显这些凭证。
 
 ## 命令速查
 
@@ -122,7 +124,7 @@ bdp gsearch 539478953581833690 "倪海厦" --json
 
 ## 安全边界
 
-1. **凭证保护**：绝不输出/记录 `~/.bdp/config.json` 中的 BDUSS、STOKEN 值。`bdp config` 输出含前 10 位掩码，同样禁止回显
+1. **凭证保护**：绝不输出/记录 `~/.bdp/config.json` 中的 BDUSS、STOKEN 值，也不得读取或传输 `~/.bdp/browser-profile`。`bdp config` 输出含前 10 位掩码，同样禁止回显
 2. **删除操作**：`bdp rm` 为高风险操作，执行前需用户明确确认
 3. **写入操作**（put/mkdir/rm）：先向用户列出执行计划，确认后再执行
 4. **下载目录**：默认保存到用户指定目录或当前工作目录，不写入系统目录

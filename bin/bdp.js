@@ -90,14 +90,77 @@ function parseArgs(argv) {
 const cmds = {};
 
 cmds.login = async (args, json) => {
-  if (args.flags.bduss) config.set("bduss", args.flags.bduss);
-  if (args.flags.stoken) config.set("stoken", args.flags.stoken);
-  const cfg = config.get();
-  output(
-    { success: true, bduss: cfg.bduss ? "***set***" : "missing", stoken: cfg.stoken ? "***set***" : "missing" },
-    json,
-    () => console.log("Credentials saved to " + config.CONFIG_FILE)
-  );
+  // 方式 1: 手动传入凭证
+  if (args.flags.bduss || args.flags.stoken) {
+    if (!args.flags.bduss || !args.flags.stoken) {
+      throw new Error("Manual login requires both --bduss and --stoken");
+    }
+    config.setAuth({
+      bduss: args.flags.bduss,
+      stoken: args.flags.stoken,
+      webTransport: "curl",
+    });
+    const cfg = config.get();
+    output(
+      { success: true, bduss: cfg.bduss ? "***set***" : "missing", stoken: cfg.stoken ? "***set***" : "missing" },
+      json,
+      () => console.log("Credentials saved to " + config.CONFIG_FILE)
+    );
+    return;
+  }
+
+  // 方式 2: 浏览器自动登录（扫码，Agent 代劳）
+  const { browserLogin } = require("../lib/browser-login");
+  const status = (msg) => {
+    if (!json) console.log(msg);
+  };
+
+  status("🔐 bdp login: 未提供 --bduss/--stoken，启动浏览器扫码登录...");
+  try {
+    const previous = config.get();
+    const creds = await browserLogin({
+      onStatus: status,
+      profileDir: previous.browserProfile || undefined,
+      port: previous.webTransport === "browser" ? previous.browserPort : undefined,
+    });
+    config.setAuth({
+      bduss: creds.bduss,
+      stoken: creds.stoken,
+      webTransport: "browser",
+      browserProfile: creds.browserProfile,
+      browserPort: creds.browserPort,
+    });
+    status("✅ 登录成功，凭证已保存到 " + config.CONFIG_FILE);
+
+    // 同步登录 BaiduPCS-Go 引擎（全盘操作依赖）
+    try {
+      const { spawnSync } = require("child_process");
+      const cfg = config.get();
+      const loginResult = spawnSync(cfg.pcsPath, ["login", `-bduss=${creds.bduss}`, `-stoken=${creds.stoken}`], {
+        encoding: "utf-8",
+        timeout: 30000,
+      });
+      if (loginResult.stdout && loginResult.stdout.includes("登录成功")) {
+        status("✅ BaiduPCS-Go 引擎已同步登录");
+      } else {
+        status("⚠️ BaiduPCS-Go 引擎登录失败: " + (loginResult.stdout || loginResult.stderr || "未知错误").trim().substring(0, 100));
+      }
+    } catch (e) {
+      status("⚠️ BaiduPCS-Go 引擎登录异常: " + e.message);
+    }
+
+    if (json) {
+      console.log(JSON.stringify({ success: true, method: "browser-qr", bduss: "***set***", stoken: "***set***" }));
+    }
+  } catch (e) {
+    if (json) {
+      console.log(JSON.stringify({ error: e.message }));
+    } else {
+      console.error(`[ERROR] ${e.message}`);
+      console.error("        提示: 也可手动方式 bdp login --bduss <值> --stoken <值>");
+    }
+    process.exit(1);
+  }
 };
 
 cmds.whoami = async (args, json) => {
@@ -107,6 +170,7 @@ cmds.whoami = async (args, json) => {
       loggedIn: !!(cfg.bduss && cfg.stoken),
       bduss: cfg.bduss ? "***set***" : "missing",
       stoken: cfg.stoken ? "***set***" : "missing",
+      webTransport: cfg.webTransport,
       pcsPath: cfg.pcsPath,
       configFile: config.CONFIG_FILE,
     },
@@ -115,6 +179,7 @@ cmds.whoami = async (args, json) => {
       console.log(`Status:     ${d.loggedIn ? "✅ Logged in" : "❌ Not logged in"}`);
       console.log(`BDUSS:      ${d.bduss}`);
       console.log(`STOKEN:     ${d.stoken}`);
+      console.log(`Web API:    ${d.webTransport}`);
       console.log(`PCS Path:   ${d.pcsPath}`);
       console.log(`Config:     ${d.configFile}`);
     }
@@ -127,6 +192,7 @@ cmds.config = async (args, json) => {
     console.log("Configuration:");
     console.log(`  bduss:     ${d.bduss ? d.bduss.substring(0, 10) + "..." : "(not set)"}`);
     console.log(`  stoken:    ${d.stoken ? d.stoken.substring(0, 10) + "..." : "(not set)"}`);
+    console.log(`  web API:   ${d.webTransport}`);
     console.log(`  pcsPath:   ${d.pcsPath}`);
     console.log(`  ua:        ${d.ua.substring(0, 40)}...`);
     console.log(`  maxBytes:  ${d.maxBytes}`);
@@ -336,7 +402,8 @@ GROUP CHAT OPERATIONS (群聊)
   gsearch <gid> <keyword>    Search group file names
 
 CONFIGURATION
-  login --bduss X --stoken Y  Save credentials
+  login                        Browser QR login (auto-detect cookies)
+  login --bduss X --stoken Y   Save credentials manually
   whoami                       Check login status
   config                       Show configuration
 
@@ -380,7 +447,11 @@ async function main() {
     } else {
       console.error(`[ERROR] ${e.message}`);
     }
-    process.exit(1);
+    process.exitCode = 1;
+  } finally {
+    try {
+      require("../lib/browser-login").disconnectBrowserSession();
+    } catch {}
   }
 }
 

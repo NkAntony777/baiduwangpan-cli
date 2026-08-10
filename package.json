@@ -1,6 +1,6 @@
 {
   "name": "baiduwangpan-cli",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "百度网盘 CLI — 全盘读写 · 免下载读取文件内容 · 群聊文件浏览 (Agent 友好)",
   "main": "lib/index.js",
   "bin": {
@@ -8,10 +8,14 @@
   },
   "scripts": {
     "start": "node bin/bdp.js",
+    "test": "node --test",
     "postinstall": "node scripts/postinstall.js"
   },
   "engines": {
     "node": ">=14"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
   },
   "license": "MIT",
   "keywords": [
@@ -34,7 +38,7 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/NkAntony777/baiduwangpan-cli.git"
+    "url": "git+https://github.com/NkAntony777/baiduwangpan-cli.git"
   },
   "homepage": "https://github.com/NkAntony777/baiduwangpan-cli",
   "bugs": {

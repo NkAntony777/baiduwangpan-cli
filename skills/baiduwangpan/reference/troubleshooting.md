@@ -8,7 +8,7 @@
 |---------|------|------|
 | `Cannot get file size for: <path>` | 无法获取文件元信息 | 确认路径存在；重新登录（Cookie 可能过期） |
 | `Cannot get dlink for: <path>` | 获取下载直链失败 | 重新 `bdp login`；检查网络 |
-| `Cannot get bdstoken...` | 凭证失效 | 重新获取 BDUSS/STOKEN 并 `bdp login` |
+| `Cannot get bdstoken...` | 网页会话失效 | 扫码模式重新运行 `bdp login`；手动模式更新 BDUSS/STOKEN |
 | `API error: errno=...` | 群聊接口异常 | 百度 mbox 接口可能变更（逆向接口），等待工具更新 |
 | `BaiduPCS-Go not found at: ...` | 引擎缺失 | 见下方"引擎未自动下载" |
 
@@ -34,12 +34,14 @@ bdp whoami
 
 ## 运行命令报 "Cannot get bdstoken"
 
-原因：BDUSS/STOKEN 失效或配置未生效。
+原因：BDUSS/STOKEN 失效、扫码浏览器 profile 失效，或配置未生效。
 
 处理：
 1. `bdp whoami --json` 检查 `loggedIn` 和 `bduss`/`stoken` 状态
-2. 重新获取 Cookie 并 `bdp login`
+2. `webTransport` 为 `browser` 时重新执行 `bdp login`；为 `curl` 时更新 Cookie
 3. 确认系统时间正确（bdstoken 依赖时间戳）
+
+扫码模式下 Chrome/Edge 是网页 API 的会话宿主。进程被关闭时工具会使用 `~/.bdp/browser-profile` 自动重启；若页面要求重新登录，执行 `bdp login` 完成扫码。
 
 ## 搜索/读取返回空或乱码
 
