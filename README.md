@@ -240,9 +240,56 @@ baiduwangpan-cli/
 │   ├── http.js               # HTTP 客户端 (curl 封装)
 │   ├── pan.js                # 网盘操作 (BaiduPCS-Go 桥接)
 │   └── group.js              # 群聊操作 (逆向 mbox API)
+├── skills/
+│   └── baiduwangpan/         # Agent Skill 源文件 (SKILL.md + reference + scripts)
+├── baiduwangpan-skill.zip    # Agent Skill 打包 (Releases 附件)
 ├── bdp.js                    # 早期独立版 (保留参考)
 ├── bdp-group.js              # 早期独立版 (保留参考)
 └── bdp.py                    # Python 版 (备用)
+```
+
+## 🤖 Agent Skill 使用
+
+本仓库附带一个标准格式的 Agent Skill，让 Claude Code / Codex / OpenClaw / Cursor 等 Agent 通过自然语言操作百度网盘。
+
+### 安装 Skill
+
+从 [Releases](https://github.com/NkAntony777/baiduwangpan-cli/releases) 下载 `baiduwangpan-skill.zip`，或直接复制仓库 `skills/baiduwangpan/` 文件夹：
+
+```bash
+# 各平台 skills 目录
+~/.claude/skills/            # Claude Code
+~/.codex/skills/             # Codex CLI
+~/.config/opencode/skills/   # OpenCode
+# 或对应 Agent 的 skills 目录
+```
+
+### Skill 使用
+
+Agent 加载 skill 后，自然语言即可驱动（skill 会自动触发）：
+
+```
+用户: 看看我网盘里有什么
+用户: 在群里找倪海厦的资料
+用户: 读一下 /文档/data.csv 前几行
+用户: 搜索网盘里所有报告文件
+```
+
+skill 会自动执行 `bdp` 命令并返回结构化结果（含 `--json` 输出）。
+
+### Skill 内容
+
+```
+skills/baiduwangpan/
+├── SKILL.md                      # 技能定义（触发规则 + 命令规范 + 安全边界）
+├── reference/
+│   ├── commands.md               # 完整命令参考
+│   ├── authentication.md         # 凭证获取与配置
+│   ├── examples.md               # Agent 使用示例 + JSON 输出格式
+│   └── troubleshooting.md        # 故障排查
+└── scripts/
+    ├── setup.sh                  # macOS/Linux 自动安装
+    └── setup.ps1                 # Windows 自动安装
 ```
 
 ## ⚠️ 注意事项
