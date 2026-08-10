@@ -229,17 +229,24 @@ bdp groups                          bdp gshares <gid>
     │                                   │
     ├── /mbox/group/list                ├── /mbox/group/listshare
     │   → 获取全部群组 (gid)             │   → 获取分享库 (msg_id + from_uk + fs_id)
-    │                                   │
+    │                                   │       └ has_more=1 时按 last_msg_time 游标翻页
     └───────────────────────────────────┘
                 ↓
-        bdp gls <gid> <fs_id>
-                │
-                ├── /mbox/msg/shareinfo
-                │   → 浏览文件/子目录 (分页)
-                │   → 递归遍历目录树
-                ↓
-            文件列表 (名称/大小/类型/fs_id)
+        bdp gls <gid> <fs_id>       bdp gsearch <gid> "关键词"
+                │                        │
+                ├── /mbox/msg/shareinfo  ├── 全量遍历: shareinfo 自动翻页 (每页上限 100)
+                │   → 浏览文件/子目录     │   → 目录级并发扫描 + 磁盘缓存
+                ↓                        ↓
+            文件列表 (名称/大小/类型/fs_id)    匹配结果
 ```
+
+**逆向实测结论（2026-08）**：
+
+- 群聊文件**没有服务端搜索接口**（`listshare`/`shareinfo` 的 `key`/`keyword` 参数被忽略，`/api/search` 不支持群维度）——网页端搜索同样是客户端遍历，`gsearch` 走的是同一条路。
+- `shareinfo` 每页**硬上限 100 条**（`num>100` 不返回更多），`page` 翻页可用 → `gsearch`/`gtree` 自动全页遍历，不再漏数据。
+- 高频调用会触发限流，表现为 `errno=-3`、**self-echo**（`errno=0` 但返回目录自身）、或空列表；工具自动退避重试、连续限流停止扫描，重跑命令即续扫。
+- 群文件路径可能含**非法百分号编码**（裸 `%`），直接 `decodeURIComponent` 会抛 `URIError` 报废整个目录 → 已改为安全解码。
+- `gsearch`/`gtree`/`gshares` 默认启用**磁盘会话缓存**（目录 30min / 分享 5min，`~/.bdp/cache/`，`--no-cache` 关闭、`bdp cache clear` 清理）——重复搜索秒回，深扫续扫收敛。
 
 ## 📁 项目结构
 

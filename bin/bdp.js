@@ -112,6 +112,12 @@ function parseArgs(argv) {
       opts.flags.depth = parseInt(argv[++i], 10) || 2;
     } else if (arg === "--max-nodes") {
       opts.flags.maxNodes = parseInt(argv[++i], 10) || 2000;
+    } else if (arg === "--max-pages") {
+      opts.flags.maxPages = parseInt(argv[++i], 10) || 50;
+    } else if (arg === "--max-requests") {
+      opts.flags.maxRequests = parseInt(argv[++i], 10) || 400;
+    } else if (arg === "--no-cache") {
+      opts.flags.noCache = true;
     } else if (arg === "--from-uk") {
       opts.flags.fromUk = argv[++i];
     } else if (arg === "--msg-id") {
@@ -379,7 +385,7 @@ cmds.groups = async (args, json) => {
 cmds.gshares = async (args, json) => {
   const gid = args._[0];
   if (!gid) { console.error("Usage: bdp gshares <gid>"); process.exit(1); }
-  const shares = await group.listShares(gid);
+  const shares = await group.listShares(gid, { cache: args.flags.noCache !== true });
   output(shares, json, (list) => {
     console.log(`${list.length} shares in group ${gid}:\n`);
     list.forEach((s, i) => {
@@ -397,6 +403,7 @@ cmds.gls = async (args, json) => {
   const opts = {
     page: args.flags.page || 1,
     pageSize: args.flags.pageSize || 50,
+    cache: args.flags.noCache !== true,
   };
   if (args.flags.fromUk) opts.fromUk = args.flags.fromUk;
   if (args.flags.msgId) opts.msgId = args.flags.msgId;
@@ -408,6 +415,10 @@ cmds.gls = async (args, json) => {
   if (args.flags.legacyJson) {
     emitJson(result.files, args);
     return;
+  }
+
+  if (result.autoResolved) {
+    console.error(`[auto] 传入的 fromUk/msgId 与群 ${gid} 不匹配（API errno=2131），已自动改用 gshares 解析的参数 (fromUk=${result.fromUk}, msgId=${result.msgId})`);
   }
 
   if (result.fallback) {
@@ -436,8 +447,11 @@ cmds.gtree = async (args, json) => {
     depth: args.flags.depth || 2,
     concurrency: args.flags.concurrency || 4,
     maxNodes: args.flags.maxNodes || 2000,
+    maxPages: args.flags.maxPages || 50,
+    maxRequests: args.flags.maxRequests || 400,
+    cache: args.flags.noCache !== true,
   };
-  verboseLog(args, `gtree gid=${gid} depth=${opts.depth} concurrency=${opts.concurrency} maxNodes=${opts.maxNodes}`);
+  verboseLog(args, `gtree gid=${gid} depth=${opts.depth} concurrency=${opts.concurrency} maxNodes=${opts.maxNodes} maxPages=${opts.maxPages} maxRequests=${opts.maxRequests} cache=${opts.cache}`);
   const result = await group.treeFiles(gid, opts);
 
   if (args.flags.jsonFile || json) {
@@ -463,13 +477,22 @@ cmds.gsearch = async (args, json) => {
     unique: args.flags.unique !== false,
     all: args.flags.all === true,
     depth: args.flags.depth || 1,
+    maxPages: args.flags.maxPages || 50,
+    maxRequests: args.flags.maxRequests || 400,
+    cache: args.flags.noCache !== true,
   };
 
-  verboseLog(args, `gsearch gid=${gid} keyword="${keyword}" page=${opts.page} limit=${opts.limit} concurrency=${opts.concurrency} unique=${opts.unique} all=${opts.all}`);
+  verboseLog(args, `gsearch gid=${gid} keyword="${keyword}" page=${opts.page} limit=${opts.limit} concurrency=${opts.concurrency} unique=${opts.unique} all=${opts.all} depth=${opts.depth} maxPages=${opts.maxPages} maxRequests=${opts.maxRequests} cache=${opts.cache}`);
   const result = await group.searchFiles(gid, keyword, opts);
 
   if (result.partial) {
     verboseLog(args, `partial: ${result.failedShares}/${result.totalShares} shares failed`);
+    if (result.failedDirs && result.failedDirs.length > 0) {
+      verboseLog(args, `failed dirs: ${result.failedDirs.map((f) => `${f.name || f.fsId}(${f.errno})`).slice(0, 10).join(", ")}`);
+    }
+  }
+  if (result.throttled) {
+    verboseLog(args, `throttled: API 限流中断，重跑命令可续扫（磁盘缓存只补缺失目录）`);
   }
 
   if (args.flags.legacyJson) {
@@ -485,19 +508,50 @@ cmds.gsearch = async (args, json) => {
       const dir = r.isDir ? "[DIR] " : "      ";
       console.log(`  ${dir}${r.path || r.name}  ${formatSize(r.size)}  fs_id:${r.fsId}`);
     });
-    if (result.partial) {
+    if (result.throttled) {
+      console.error(`⚠️  API 限流中断（已扫描 ${result.scannedShares}/${result.totalShares} 分享，失败 ${result.failedShares}）。重跑命令可续扫（磁盘缓存加速）`);
+    } else if (result.partial) {
       console.error(`[verbose] ${result.failedShares} shares failed (partial result)`);
     }
   }
 };
 
+cmds.cache = async (args, json) => {
+  const action = args._[0] || "info";
+  const { clearGroupCache } = group;
+  if (action === "clear") {
+    clearGroupCache();
+    output({ cleared: true }, json, () => console.log("✅ 群聊会话缓存已清除"));
+    return;
+  }
+  // info: 显示缓存目录位置
+  const path = require("path");
+  const os = require("os");
+  const dir = process.env.BDP_CACHE_DIR || path.join(os.homedir(), ".bdp", "cache");
+  output({ cacheDir: dir, ttl: { dir: "30min", shares: "5min" } }, json, () => {
+    console.log(`Cache dir:  ${dir}`);
+    console.log(`Dir TTL:    30 min (gsearch/gtree 目录列表)`);
+    console.log(`Shares TTL: 5 min (gshares 分享列表)`);
+    console.log(`Clear with: bdp cache clear`);
+  });
+};
+
 cmds.error = async (args, json) => {
   const code = args._[0] || "-3";
   const ERRORS = {
-    "-3": "群分享 API 拒绝请求。已观察到大目录、错误的 msgId/fromUk、过期分享都可能触发。\n" +
-          "处理：减小 --page-size（自动重试 50→20→10），或携带 gsearch 返回的 fromUk/msgId/parentFsId 信息重试；\n" +
+    "-3": "群分享 API 拒绝请求。已观察到大目录、错误的 msgId/fromUk、过期分享、请求过于频繁(限流)都可能触发。\n" +
+          "处理：减小 --page-size（自动重试 50→20→10）或 --concurrency；\n" +
+          "      限流表现为 errno=0 但只返回目录自身（self-echo），工具会自动退避重试(1s/2s)；\n" +
+          "      大目录已支持自动全页遍历（每页上限 100，--max-pages 控制页数）；\n" +
           "      若回退到父目录（fallback level=parent），Agent 应从父目录换路径继续遍历。",
     "-6": "接口鉴权失败。通常为 access_token/cookie 失效，请重新执行 bdp login。",
+    "2131": "群分享 msg_id 不属于该群（shareinfo 以 msg_id 为查找键，from_uk 不参与校验）。\n" +
+            "常见原因：gid 与 --from-uk/--msg-id/--parent-fs-id 来自不同群/分享库（参数错配）。\n" +
+            "处理：用 bdp gshares <gid> 查看本群分享（或 bdp gsearch <gid> <关键词>），\n" +
+            "      取其中一行的 fsId/fromUk/msgId 重试，保证 gid/fsId/fromUk/msgId 同源；\n" +
+            "      fsId 为子目录时保持其父分享行的 fromUk/msgId 不变；\n" +
+            "      或去掉 --from-uk/--msg-id 让 CLI 自动解析（仅顶层分享）。\n" +
+            "      工具已支持：显式参数错配时自动按 fsId 纠正（结果含 autoResolved:true）。",
   };
   const msg = ERRORS[code] || `未知错误码 ${code}，请提交 Issue: https://github.com/NkAntony777/baiduwangpan-cli/issues`;
   if (args.flags.jsonFile || json) {
@@ -534,8 +588,10 @@ GROUP CHAT OPERATIONS (群聊)
                              [--depth N] [--concurrency N] [--max-nodes N]
   gls <gid> <fs_id>          Browse files in a share
                              [--page N] [--page-size N] [--from-uk X] [--msg-id Y] [--parent-fs-id Z]
-  gsearch <gid> <keyword>    Search group file names
-                             [--page N] [--limit N] [--depth N] [--concurrency N] [--no-unique] [--all]
+  gsearch <gid> <keyword>    Search group file names (全量遍历目录, 缓存命中秒回)
+                             [--page N] [--limit N] [--depth N] [--concurrency N]
+                             [--max-pages N] [--max-requests N] [--no-unique] [--all] [--no-cache]
+  cache [clear]              Show cache info or clear session cache
   error <code>               Explain an error code (e.g. -3)
 
 CONFIGURATION
@@ -559,7 +615,10 @@ OPTIONS
   --limit <N>                 Page size for gsearch (default 50)
   --depth <N>                 Recursive search/tree depth (gsearch default 1, gtree default 2)
   --max-nodes <N>             Tree node cap (gtree default 2000)
+  --max-pages <N>             Max pages per directory scan (gsearch/gtree default 50, 100 items/page)
+  --max-requests <N>          Request budget per command (gsearch/gtree default 400, prevents throttle)
   --concurrency <N>           Parallel share scans for gsearch/gtree (default 4)
+  --no-cache                  Disable in-process session cache (gsearch/gtree/gshares/gls)
   --no-unique                 Keep duplicates from different msgId (gsearch)
   --all                       Fetch all results, no paging (gsearch, not Agent default)
 
@@ -594,7 +653,7 @@ async function main() {
     await handler(args, json);
   } catch (e) {
     if (json) {
-      console.log(JSON.stringify({ error: e.message }));
+      console.log(JSON.stringify({ error: e.message, ...(e.errno !== undefined ? { errno: e.errno } : {}) }));
     } else {
       console.error(`[ERROR] ${e.message}`);
     }

@@ -168,10 +168,11 @@ bdp groups --json
 ### gshares — 列出群内分享库
 
 ```
-bdp gshares <gid>
+bdp gshares <gid> [--no-cache]
 ```
 
-返回群内所有分享库（顶层目录）：名称、fs_id、分享者、msg_id。
+返回群内所有分享库（顶层目录）：名称、fs_id、分享者、msg_id。has_more=1 时按 last_msg_time 游标自动翻页。
+- `--no-cache` 跳过 5 分钟会话缓存，强制拉取最新
 
 ```bash
 bdp gshares 539478953581833690
@@ -181,7 +182,7 @@ bdp gshares 539478953581833690 --json
 ### gls — 浏览分享库内容
 
 ```
-bdp gls <gid> <fs_id> [--page <N>] [--page-size <N>] [--from-uk <X>] [--msg-id <Y>] [--parent-fs-id <Z>]
+bdp gls <gid> <fs_id> [--page <N>] [--page-size <N>] [--from-uk <X>] [--msg-id <Y>] [--parent-fs-id <Z>] [--no-cache]
 ```
 
 - 浏览分享库内的文件和子目录
@@ -200,14 +201,19 @@ bdp gls 539478953581833690 742474845517885 --page 2 --page-size 50 --json
 - 目标为顶层分享 → 退回 gshares 结果，`fallback.level: "group-shares"`
 - Agent 应依据 fallback 从父目录换路径继续遍历
 
+**errno=2131 处理**：msg_id 不属于该群（常见为 gid 与参数来自不同群/分享库）时，工具自动按 fsId 从本群 gshares 解析纠正并重试（结果含 `autoResolved:true`）；无法纠正时返回详细指引（`bdp error 2131`）
+
 ### gsearch — 搜索群文件名
 
 ```
-bdp gsearch <gid> <keyword> [--page <N>] [--limit <N>] [--concurrency <N>] [--no-unique] [--all] [--verbose] [--json-file <path>]
+bdp gsearch <gid> <keyword> [--page <N>] [--limit <N>] [--depth <N>] [--concurrency <N>] [--max-pages <N>] [--max-requests <N>] [--no-unique] [--all] [--no-cache] [--verbose] [--json-file <path>]
 ```
 
-- 搜索顶层分享 + 第一层子目录的文件名
+- 搜索顶层分享 + 子目录文件名（`--depth N` 递归深度，默认 1）
+- 目录内容自动全页遍历（每页上限 100，`--max-pages` 默认 50），不再漏数据
 - 默认 `--limit 50`，**只取一页**；`hasMore: true` 时用 `--page` 翻页
+- `--max-requests N` 单条命令请求预算（默认 400），防止深扫触发限流
+- 默认启用磁盘会话缓存（目录 30min/分享 5min），重复搜索秒回；`--no-cache` 关闭
 - 默认去重（相同 fsId 不同 msgId 只返回一次）；`--no-unique` 保留全部来源
 - `--concurrency 4` 并发扫描分享目录（1-8），稀疏关键词时提前停止
 - `--all` 忽略分页获取全部（不作为默认）
@@ -227,14 +233,30 @@ bdp gsearch 539478953581833690 "资料" --limit 50 --json-file result.json
                  "fsId": "...", "parentFsId": "...", "fromUk": "...", "msgId": "...", "group": "..." } ],
   "page": 1, "pageSize": 50, "returned": 5,
   "total": null, "hasMore": true, "nextPage": 2,
-  "unique": true, "complete": false, "partial": false,
-  "scannedShares": 7, "totalShares": 73, "failedShares": 0
+  "unique": true, "complete": false, "partial": false, "throttled": false,
+  "scannedShares": 7, "totalShares": 73, "failedShares": 0, "failedDirs": [],
+  "throttledShares": 0, "cachedDirs": 0, "budgetUsed": 12, "maxPages": 50
 }
 ```
 
 - `hasMore`/`nextPage`：翻页依据
-- `complete`：是否扫描完所有分享；`partial`：是否有分享失败（结果不完整）
-- `scannedShares`/`totalShares`/`failedShares`：扫描进度元数据
+- `complete`：是否扫描完所有分享；`partial`：是否有分享失败（结果不完整）；`throttled`：是否因 API 限流中断（重跑命令可续扫，磁盘缓存只补缺失目录）
+- `failedDirs`：失败目录明细（fsId/name/errno，最多 50 条）
+- `scannedShares`/`totalShares`/`failedShares`/`throttledShares`/`cachedDirs`/`budgetUsed`：扫描进度元数据
+
+### cache — 会话缓存管理
+
+```
+bdp cache [clear]
+```
+
+- 无参数：显示缓存目录与 TTL（目录 30min / 分享 5min）
+- `cache clear`：清空群聊会话缓存（L1 内存 + L2 磁盘，`~/.bdp/cache/`）
+
+```bash
+bdp cache
+bdp cache clear
+```
 
 ### error — 错误码说明
 
@@ -244,8 +266,10 @@ bdp error <code>
 
 ```bash
 bdp error -3
-# 群分享 API 拒绝请求。已观察到大目录、错误的 msgId/fromUk、过期分享都可能触发。
-# 处理：减小 --page-size（自动重试 50→20→10），或携带 gsearch 返回的 fromUk/msgId/parentFsId 信息重试
+# 群分享 API 拒绝请求。已观察到大目录、错误的 msgId/fromUk、过期分享、请求过于频繁(限流)都可能触发。
+# 处理：减小 --page-size（自动重试 50→20→10）或 --concurrency；限流表现为 errno=0 只返回目录自身，工具自动退避重试
+bdp error 2131
+# msg_id 不属于该群：gid 与 fromUk/msgId 必须同源，工具会自动按 fsId 纠正（autoResolved:true）
 ```
 
 ## 配置命令
@@ -268,7 +292,7 @@ bdp config                            # 查看配置
 ### gtree — 构建群目录树
 
 ```
-bdp gtree <gid> [--depth N] [--concurrency N] [--max-nodes N]
+bdp gtree <gid> [--depth N] [--concurrency N] [--max-nodes N] [--max-pages N] [--max-requests N] [--no-cache]
 ```
 
 - BFS 逐层构建目录树，默认 depth 2，节点上限 2000

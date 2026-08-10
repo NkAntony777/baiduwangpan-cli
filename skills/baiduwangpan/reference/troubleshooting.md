@@ -10,6 +10,7 @@
 | `Cannot get dlink for: <path>` | 获取下载直链失败 | 重新 `bdp login`；检查网络 |
 | `Cannot get bdstoken...` | 凭证失效 | 重新获取 BDUSS/STOKEN 并 `bdp login` |
 | `API error: errno=...` | 群聊接口异常 | 百度 mbox 接口可能变更（逆向接口），等待工具更新 |
+| `API error: errno=2131` | 群分享 `msg_id` 不属于该群（gid 与参数来自不同群/分享库） | 运行 `bdp gshares <gid>`（或 `bdp gsearch <gid> <关键词>`）取同一行的 fsId/fromUk/msgId 重试；或去掉 `--from-uk/--msg-id` 让 CLI 自动解析。工具会自动按 fsId 纠正错配参数（结果含 `autoResolved:true`） |
 | `BaiduPCS-Go not found at: ...` | 引擎缺失 | 见下方"引擎未自动下载" |
 
 ## bdp 命令不存在
@@ -59,6 +60,7 @@ bdp whoami
 
 - **"Cannot get bdstoken"**：见上，Cookie 失效
 - **群文件为空**：该群可能没有分享库，或分享被群主撤回
+- **`errno=2131`（msg_id 不属于该群）**：gid 与 `--from-uk/--msg-id/--parent-fs-id` 必须同源。用 `bdp error 2131` 查看详细说明；最常见原因是把别的群的参数抄到了当前 gid 上
 - **"API error"**：百度 mbox 接口可能变更（逆向接口），关注项目更新
 
 ## 下载/上传失败

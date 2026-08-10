@@ -1,5 +1,12 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const fs = require("fs");
+const os = require("os");
+const path = require("path");
+
+// 缓存写入隔离到临时目录，避免污染真实 ~/.bdp/cache
+const TMP_CACHE = fs.mkdtempSync(path.join(os.tmpdir(), "bdp-cache-test-"));
+process.env.BDP_CACHE_DIR = TMP_CACHE;
 
 // Mock http 模块（替换 require.cache）
 const httpPath = require.resolve("../lib/http");
@@ -169,6 +176,48 @@ test("listFiles falls back to parent directory when errno=-3 persists", async ()
   assert.equal(result.files[0].name, "sibling.txt");
 });
 
+test("listFiles auto-resolves mismatched fromUk/msgId when shareinfo returns errno=2131", async () => {
+  const seenMsgIds = [];
+  mockHttp.webJson = async (url) => {
+    if (url.includes("/mbox/group/listshare")) {
+      return makeApi({ msg_count: 1, msg_list: [{ msg_id: "m1", uk: 1, file_list: [share("999", "top", { isdir: "1" })] }] });
+    }
+    if (url.includes("/mbox/msg/shareinfo")) {
+      const msgId = new URL(url).searchParams.get("msg_id");
+      seenMsgIds.push(msgId);
+      if (msgId === "wrong-msg") return { errno: 2131 };
+      return makeApi([share("777", "ok.txt")]);
+    }
+    throw new Error("unexpected url " + url);
+  };
+
+  // 用户显式传入与 gshares 不一致的 fromUk/msgId → API 2131 → 自动按 fsId 纠正重试
+  const result = await group.listFiles("gid", "999", { fromUk: "2", msgId: "wrong-msg" });
+  assert.equal(result.autoResolved, true, "autoResolved flag set");
+  assert.equal(result.msgId, "m1", "corrected to gshares msgId");
+  assert.equal(result.fromUk, "1", "corrected to gshares fromUk");
+  assert.equal(result.files[0].name, "ok.txt");
+  assert.deepEqual(seenMsgIds, ["wrong-msg", "m1"], "retried once with resolved params");
+});
+
+test("listFiles reports detailed errno=2131 error when msgId not in group and fsId unresolvable", async () => {
+  mockHttp.webJson = async (url) => {
+    if (url.includes("/mbox/group/listshare")) {
+      return makeApi({ msg_count: 1, msg_list: [{ msg_id: "m1", uk: 1, file_list: [share("999", "top", { isdir: "1" })] }] });
+    }
+    if (url.includes("/mbox/msg/shareinfo")) {
+      return { errno: 2131 };
+    }
+    throw new Error("unexpected url " + url);
+  };
+
+  await assert.rejects(
+    group.listFiles("gid", "subdir-of-another-group", { fromUk: "2", msgId: "foreign-msg" }),
+    (e) => e instanceof ShareApiError && e.errno === 2131 && /不属于群/.test(e.message),
+    "detailed 2131 error with guidance"
+  );
+});
+
 test("searchFiles reports partial when some shares fail, without swallowing everything", async () => {
   mockHttp.webJson = async (url) => {
     if (url.includes("/mbox/group/listshare")) {
@@ -192,4 +241,191 @@ test("searchFiles reports partial when some shares fail, without swallowing ever
   assert.equal(result.partial, true);
   assert.equal(result.failedShares, 1);
   assert.equal(result.results.some((r) => r.fsId === "333"), true, "good share results still returned");
+});
+
+// ── 新逆向能力：全页遍历 / 限流自愈 / 缓存 / 游标分页 ──
+
+test("searchFiles fetches ALL pages of a directory when has_more=1 (no data loss beyond 100)", async () => {
+  const pages = [];
+  mockHttp.webJson = async (url) => {
+    if (url.includes("/mbox/group/listshare")) {
+      return makeApi({ msg_count: 1, msg_list: [{ msg_id: "m1", uk: 1, file_list: [share("dir1", "TOP", { isdir: "1" })] }] });
+    }
+    if (url.includes("/mbox/msg/shareinfo")) {
+      const page = Number(new URL(url).searchParams.get("page"));
+      pages.push(page);
+      if (page === 1) {
+        return makeApi(Array.from({ length: 100 }, (_, i) => share(String(1000 + i), "f" + String(i).padStart(3, "0") + " 报告")), { hasMore: true });
+      }
+      if (page === 2) {
+        return makeApi(Array.from({ length: 50 }, (_, i) => share(String(2000 + i), "g" + String(i).padStart(3, "0") + " 报告")));
+      }
+      throw new Error("unexpected page " + page);
+    }
+    throw new Error("unexpected url " + url);
+  };
+
+  const result = await group.searchFiles("gid", "报告", { limit: 200 });
+  assert.deepEqual(pages, [1, 2], "walked page 1 and page 2");
+  assert.equal(result.results.length, 150, "no records lost beyond the 100/page cap");
+  assert.equal(result.hasMore, false);
+});
+
+test("fetchShareDir retries throttled self-echo responses then succeeds", async () => {
+  let shareinfoCalls = 0;
+  mockHttp.webJson = async (url) => {
+    if (url.includes("/mbox/group/listshare")) {
+      return makeApi({ msg_count: 1, msg_list: [{ msg_id: "m1", uk: 1, file_list: [share("dir1", "TOP", { isdir: "1" })] }] });
+    }
+    if (url.includes("/mbox/msg/shareinfo")) {
+      shareinfoCalls++;
+      if (shareinfoCalls <= 2) {
+        // 限流退化：errno=0 但返回"目录自身"
+        return makeApi([share("dir1", "TOP", { isdir: "1" })]);
+      }
+      return makeApi([share("500", "ok 报告")]);
+    }
+    throw new Error("unexpected url " + url);
+  };
+
+  const result = await group.searchFiles("gid", "报告", {});
+  assert.equal(shareinfoCalls, 3, "two self-echo retries then success");
+  assert.equal(result.results.some((r) => r.fsId === "500"), true);
+  assert.equal(result.partial, false);
+});
+
+test("searchFiles session cache prevents re-fetching the same directory", async () => {
+  let shareinfoCalls = 0;
+  mockHttp.webJson = async (url) => {
+    if (url.includes("/mbox/group/listshare")) {
+      return makeApi({ msg_count: 1, msg_list: [{ msg_id: "m1", uk: 1, file_list: [share("dir1", "TOP", { isdir: "1" })] }] });
+    }
+    if (url.includes("/mbox/msg/shareinfo")) {
+      shareinfoCalls++;
+      return makeApi([share("500", "B 报告")]);
+    }
+    throw new Error("unexpected url " + url);
+  };
+
+  const first = await group.searchFiles("gid", "报告", { cache: true });
+  const second = await group.searchFiles("gid", "报告", { cache: true });
+  assert.equal(first.results.length, 1);
+  assert.equal(second.results.length, 1);
+  assert.equal(shareinfoCalls, 1, "second search reused cached directory listing");
+  assert.equal(second.cachedDirs, 1);
+});
+
+test("disk cache persists across fresh module state (L2)", async () => {
+  // 直接验证缓存落盘：listShares 结果可从磁盘读回
+  mockHttp.webJson = async (url) => {
+    if (!url.includes("/mbox/group/listshare")) throw new Error("unexpected url " + url);
+    return makeApi({ msg_count: 1, msg_list: [{ msg_id: "m1", uk: 1, file_list: [share("1", "a.txt")] }] });
+  };
+  await group.listShares("disk-gid", { cache: true });
+
+  // 清空内存 L1（保留磁盘），模拟新进程
+  const cacheDir = process.env.BDP_CACHE_DIR;
+  const files = fs.readdirSync(cacheDir);
+  assert.ok(files.length > 0, "cache files written to disk");
+  // 磁盘文件可 JSON 解析且含值
+  const raw = JSON.parse(fs.readFileSync(path.join(cacheDir, files[0]), "utf-8"));
+  assert.ok(Array.isArray(raw.value) && raw.value[0].fsId === "1");
+});
+
+test("searchFiles stops when request budget exhausted and reports partial", async () => {
+  const pagesFetched = [];
+  mockHttp.webJson = async (url) => {
+    if (url.includes("/mbox/group/listshare")) {
+      return makeApi({ msg_count: 1, msg_list: [{ msg_id: "m1", uk: 1, file_list: [share("dir1", "TOP", { isdir: "1" })] }] });
+    }
+    if (url.includes("/mbox/msg/shareinfo")) {
+      const page = Number(new URL(url).searchParams.get("page"));
+      pagesFetched.push(page);
+      return makeApi(Array.from({ length: 100 }, (_, i) => share(String(page * 1000 + i), "x" + page + "_" + i + " 报告")), { hasMore: true });
+    }
+    throw new Error("unexpected url " + url);
+  };
+
+  const result = await group.searchFiles("gid", "报告", { maxRequests: 2, limit: 500 });
+  assert.deepEqual(pagesFetched, [1, 2], "budget of 2 allows exactly 2 pages");
+  assert.equal(result.partial, true, "budget exhaustion marks partial");
+  assert.equal(result.failedShares, 1);
+  assert.equal(result.budgetUsed, 2);
+});
+
+test("searchFiles stops early on sustained throttle (3 consecutive self-echo)", async () => {
+  const shareinfoCalls = [];
+  mockHttp.webJson = async (url) => {
+    if (url.includes("/mbox/group/listshare")) {
+      return makeApi({
+        msg_count: 2,
+        msg_list: [
+          { msg_id: "m1", uk: 1, file_list: [share("dir1", "TOP1", { isdir: "1" })] },
+          { msg_id: "m2", uk: 2, file_list: [share("dir2", "TOP2", { isdir: "1" })] },
+          { msg_id: "m3", uk: 3, file_list: [share("dir3", "TOP3", { isdir: "1" })] },
+          { msg_id: "m4", uk: 4, file_list: [share("dir4", "TOP4", { isdir: "1" })] },
+          { msg_id: "m5", uk: 5, file_list: [share("dir5", "TOP5", { isdir: "1" })] },
+          { msg_id: "m6", uk: 6, file_list: [share("dir6", "TOP6", { isdir: "1" })] },
+        ],
+      });
+    }
+    if (url.includes("/mbox/msg/shareinfo")) {
+      const fsId = new URL(url).searchParams.get("fs_id");
+      shareinfoCalls.push(fsId);
+      // 所有目录都返回 self-echo（限流中）
+      return makeApi([share(fsId, fsId, { isdir: "1" })]);
+    }
+    throw new Error("unexpected url " + url);
+  };
+
+  const result = await group.searchFiles("gid", "报告", {});
+  assert.equal(result.throttled, true, "throttled flag set");
+  assert.equal(result.partial, true);
+  // 第一批(dir1-4)全部失败后 consecutive>=3 → 停止扫描，第二批(dir5/dir6)不再请求
+  assert.ok(!shareinfoCalls.includes("dir5"), "scan stopped before second batch dir5");
+  assert.ok(!shareinfoCalls.includes("dir6"), "scan stopped before second batch dir6");
+});
+
+test("searchFiles handles malformed percent-encoded paths (URI malformed bug)", async () => {
+  mockHttp.webJson = async (url) => {
+    if (url.includes("/mbox/group/listshare")) {
+      return makeApi({ msg_count: 1, msg_list: [{ msg_id: "m1", uk: 1, file_list: [share("dir1", "TOP", { isdir: "1" })] }] });
+    }
+    if (url.includes("/mbox/msg/shareinfo")) {
+      // 路径含裸 %（非法百分号编码）——旧实现 decodeURIComponent 会抛 URIError 报废整个目录
+      return makeApi([
+        share("1", "normal 报告"),
+        { ...share("2", "bad%name 报告"), path: "/bad%name%2", server_filename: "bad%name 报告" },
+        { ...share("3", "ok%20encoded 报告"), path: "/ok%20encoded", server_filename: "ok%20encoded 报告" },
+      ]);
+    }
+    throw new Error("unexpected url " + url);
+  };
+
+  const result = await group.searchFiles("gid", "报告", {});
+  assert.equal(result.partial, false, "directory with malformed path no longer fails");
+  assert.equal(result.failedShares, 0);
+  const byName = Object.fromEntries(result.results.map((r) => [r.name, r.path]));
+  assert.equal(byName["bad%name 报告"], "/bad%name%2", "malformed path kept raw instead of throwing");
+  assert.equal(byName["ok%20encoded 报告"], "/ok encoded", "valid percent-encoding still decoded");
+  assert.equal(byName["normal 报告"], "/normal 报告");
+});
+
+test("listShares paginates with last_msg_time cursor when has_more=1", async () => {
+  const cursors = [];
+  mockHttp.webJson = async (url) => {
+    if (!url.includes("/mbox/group/listshare")) throw new Error("unexpected url " + url);
+    const lm = new URL(url).searchParams.get("last_msg_time") || "";
+    cursors.push(lm);
+    if (!lm) {
+      // last_msg_time 为响应顶层字段（真实 API 结构）
+      return { errno: 0, has_more: 1, last_msg_time: "111", records: { msg_count: 1, msg_list: [{ msg_id: "m1", uk: 1, file_list: [share("1", "a.txt")] }] } };
+    }
+    return makeApi({ msg_count: 1, msg_list: [{ msg_id: "m2", uk: 1, file_list: [share("2", "b.txt")] }] });
+  };
+
+  const shares = await group.listShares("gid", {});
+  assert.deepEqual(cursors, ["", "111"], "second request carries last_msg_time cursor");
+  assert.equal(shares.length, 2);
+  assert.deepEqual(shares.map((s) => s.fsId).sort(), ["1", "2"]);
 });

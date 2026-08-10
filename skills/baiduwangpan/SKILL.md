@@ -101,12 +101,14 @@ bdp rm <path>                      # 删除
 
 ```bash
 bdp groups                         # 列出所有群组（拿 gid）
-bdp gshares <gid>                  # 列出群内分享库（拿 fs_id）
+bdp gshares <gid> [--no-cache]     # 列出群内分享库（拿 fs_id，自动游标翻页）
 bdp gls <gid> <fs_id> [--page N] [--page-size N] [--from-uk X] [--msg-id Y] [--parent-fs-id Z]
                                    # 浏览分享库内容（默认 page-size 50，最大 100）
-bdp gsearch <gid> <keyword>        # 搜索群文件名
-    [--page N] [--limit N] [--concurrency N] [--no-unique] [--all] [--verbose] [--json-file <path>]
-bdp error -3                       # 查看错误码说明
+bdp gsearch <gid> <keyword>        # 搜索群文件名（全量遍历目录，缓存命中秒回）
+    [--page N] [--limit N] [--depth N] [--concurrency N] [--max-pages N] [--max-requests N]
+    [--no-unique] [--all] [--no-cache] [--verbose] [--json-file <path>]
+bdp cache [clear]                  # 查看/清空会话缓存（~/.bdp/cache/，目录30min/分享5min）
+bdp error <code>                   # 查看错误码说明（如 -3 / 2131）
 ```
 
 ### 通用选项
@@ -144,7 +146,9 @@ bdp gsearch 539478953581833690 "倪海厦" --json
 - gsearch/gls 默认只取 20-50 条；看到 `hasMore: true` 时用 `--page <nextPage>` 继续翻页
 - 每个结果携带 `parentFsId`/`fromUk`/`msgId`，爬取子目录时通过 `gls --from-uk --msg-id --parent-fs-id` 传入
 - 若响应含 `fallback`（level=parent），说明目标目录 API 拒绝（errno=-3），应从 `resolvedFsId`（父目录）换路径继续遍历
-- `partial: true` 表示部分分享扫描失败，结果不完整，可重试或换关键词
+- `partial: true` 表示部分分享扫描失败，结果不完整，可重试或换关键词；`throttled: true` 表示 API 限流中断，重跑命令可续扫（磁盘缓存只补缺失目录）
+- 目录内容自动全页遍历（每页上限 100，`--max-pages` 默认 50）；`--max-requests` 控制单命令请求预算（默认 400）
+- gsearch/gtree/gshares 默认启用磁盘会话缓存，重复搜索秒回；`--no-cache` 关闭，`bdp cache clear` 清理
 - 大目录搜索可用 `--concurrency 4`（默认）并发扫描；`--all` 会忽略分页获取全部，不要作为默认行为
 
 ## 安全边界
