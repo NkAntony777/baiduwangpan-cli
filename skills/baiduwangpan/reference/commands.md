@@ -264,3 +264,18 @@ bdp config                            # 查看配置
 | `BDP_STOKEN` | STOKEN cookie | 无 |
 | `BAIDUPCS_CMD` | BaiduPCS-Go 路径 | 自动检测 |
 | `BDP_MAX_CAT_BYTES` | cat 最大读取字节 | 1048576 |
+
+### gtree — 构建群目录树
+
+```
+bdp gtree <gid> [--depth N] [--concurrency N] [--max-nodes N]
+```
+
+- BFS 逐层构建目录树，默认 depth 2，节点上限 2000
+- 返回 	ree（含 path/fsId/parentFsId/fromUk/msgId）+ ailed + 元数据
+
+```bash
+bdp gtree 539478953581833690 --depth 2 --json
+```
+
+> gsearch 的 --depth N 可递归搜索深层目录（默认 1）。深度越大请求数越多，稀疏关键词可用 gtree 建树后定位再深入。

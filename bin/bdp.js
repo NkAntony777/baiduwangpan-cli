@@ -108,6 +108,10 @@ function parseArgs(argv) {
       opts.flags.limit = parseInt(argv[++i], 10) || 50;
     } else if (arg === "--concurrency") {
       opts.flags.concurrency = parseInt(argv[++i], 10) || 4;
+    } else if (arg === "--depth") {
+      opts.flags.depth = parseInt(argv[++i], 10) || 2;
+    } else if (arg === "--max-nodes") {
+      opts.flags.maxNodes = parseInt(argv[++i], 10) || 2000;
     } else if (arg === "--from-uk") {
       opts.flags.fromUk = argv[++i];
     } else if (arg === "--msg-id") {
@@ -424,6 +428,29 @@ cmds.gls = async (args, json) => {
   }
 };
 
+cmds.gtree = async (args, json) => {
+  const gid = args._[0];
+  if (!gid) { console.error("Usage: bdp gtree <gid> [--depth N] [--concurrency N] [--max-nodes N]"); process.exit(1); }
+
+  const opts = {
+    depth: args.flags.depth || 2,
+    concurrency: args.flags.concurrency || 4,
+    maxNodes: args.flags.maxNodes || 2000,
+  };
+  verboseLog(args, `gtree gid=${gid} depth=${opts.depth} concurrency=${opts.concurrency} maxNodes=${opts.maxNodes}`);
+  const result = await group.treeFiles(gid, opts);
+
+  if (args.flags.jsonFile || json) {
+    emitJson(result, args);
+  } else {
+    console.log(`${result.tree.length} nodes (depth ${result.depth}, ${result.failed.length} failed${result.truncated ? ", truncated" : ""}):\n`);
+    result.tree.forEach((n) => {
+      const dir = n.isDir ? "[DIR] " : "      ";
+      console.log(`  ${dir}${n.path || n.name}  ${formatSize(n.size)}  fs_id:${n.fsId}`);
+    });
+  }
+};
+
 cmds.gsearch = async (args, json) => {
   const gid = args._[0];
   const keyword = args._[1];
@@ -435,6 +462,7 @@ cmds.gsearch = async (args, json) => {
     concurrency: args.flags.concurrency || 4,
     unique: args.flags.unique !== false,
     all: args.flags.all === true,
+    depth: args.flags.depth || 1,
   };
 
   verboseLog(args, `gsearch gid=${gid} keyword="${keyword}" page=${opts.page} limit=${opts.limit} concurrency=${opts.concurrency} unique=${opts.unique} all=${opts.all}`);
@@ -502,10 +530,12 @@ PAN FILE OPERATIONS (全盘)
 GROUP CHAT OPERATIONS (群聊)
   groups                     List all groups
   gshares <gid>              List share libraries in group
+  gtree <gid>                Build directory tree (BFS)
+                             [--depth N] [--concurrency N] [--max-nodes N]
   gls <gid> <fs_id>          Browse files in a share
                              [--page N] [--page-size N] [--from-uk X] [--msg-id Y] [--parent-fs-id Z]
   gsearch <gid> <keyword>    Search group file names
-                             [--page N] [--limit N] [--concurrency N] [--no-unique] [--all]
+                             [--page N] [--limit N] [--depth N] [--concurrency N] [--no-unique] [--all]
   error <code>               Explain an error code (e.g. -3)
 
 CONFIGURATION
@@ -527,7 +557,9 @@ OPTIONS
   --page <N>                  Page number (gls/gsearch)
   --page-size <N>             Page size for gls (default 50, max 100)
   --limit <N>                 Page size for gsearch (default 50)
-  --concurrency <N>           Parallel share scans for gsearch (default 4)
+  --depth <N>                 Recursive search/tree depth (gsearch default 1, gtree default 2)
+  --max-nodes <N>             Tree node cap (gtree default 2000)
+  --concurrency <N>           Parallel share scans for gsearch/gtree (default 4)
   --no-unique                 Keep duplicates from different msgId (gsearch)
   --all                       Fetch all results, no paging (gsearch, not Agent default)
 
@@ -557,6 +589,7 @@ async function main() {
     process.exit(0);
   }
 
+  let exitCode = 0;
   try {
     await handler(args, json);
   } catch (e) {
@@ -565,12 +598,13 @@ async function main() {
     } else {
       console.error(`[ERROR] ${e.message}`);
     }
-    process.exitCode = 1;
+    exitCode = 1;
   } finally {
     try {
       require("../lib/browser-login").disconnectBrowserSession();
     } catch {}
   }
+  process.exit(exitCode);
 }
 
 main();
