@@ -518,3 +518,70 @@ test("searchFiles onProgress reports running snapshots and final state", async (
   assert.equal(finalSnap.partial, false);
   assert.equal(result.complete, true);
 });
+
+test("gsearch single keyword still substring-matches (backward compat)", async () => {
+  const names = ["玄空飞星资料", "玄空大卦", "飞星盘"];
+  const items = names.map((n, i) => share(String(4300 + i), n));
+  mockHttp.webJson = async (url) => {
+    if (url.includes("/mbox/group/listshare")) {
+      return makeApi({ msg_count: 1, msg_list: [{ msg_id: "m1", uk: 1, file_list: items }] });
+    }
+    if (url.includes("/mbox/msg/shareinfo")) return makeApi([]);
+    throw new Error("unexpected url " + url);
+  };
+  const result = await group.searchFiles("gid", "玄空", {});
+  assert.deepEqual(result.results.map((r) => r.name).sort(), ["/玄空大卦", "/玄空飞星资料"]);
+});
+
+test("gsearch multi-keyword default matches ALL words (AND, order-independent)", async () => {
+  const names = ["玄空飞星资料", "玄空大卦", "飞星盘", "其它资料"];
+  const items = names.map((n, i) => share(String(4400 + i), n));
+  mockHttp.webJson = async (url) => {
+    if (url.includes("/mbox/group/listshare")) {
+      return makeApi({ msg_count: 1, msg_list: [{ msg_id: "m1", uk: 1, file_list: items }] });
+    }
+    if (url.includes("/mbox/msg/shareinfo")) return makeApi([]);
+    throw new Error("unexpected url " + url);
+  };
+  const result = await group.searchFiles("gid", "玄空 飞星", {});
+  assert.deepEqual(result.results.map((r) => r.name), ["/玄空飞星资料"]);
+});
+
+test("gsearch --any-word matches ANY keyword (OR)", async () => {
+  const names = ["玄空飞星资料", "玄空大卦", "飞星盘", "其它资料"];
+  const items = names.map((n, i) => share(String(4500 + i), n));
+  mockHttp.webJson = async (url) => {
+    if (url.includes("/mbox/group/listshare")) {
+      return makeApi({ msg_count: 1, msg_list: [{ msg_id: "m1", uk: 1, file_list: items }] });
+    }
+    if (url.includes("/mbox/msg/shareinfo")) return makeApi([]);
+    throw new Error("unexpected url " + url);
+  };
+  const result = await group.searchFiles("gid", "玄空 飞星", { anyWord: true });
+  assert.deepEqual(result.results.map((r) => r.name).sort(), ["/玄空大卦", "/玄空飞星资料", "/飞星盘"]);
+});
+
+test("gsearch --exact matches exact file name (case-insensitive)", async () => {
+  const names = ["玄空飞星资料", "玄空飞星资料集"];
+  const items = names.map((n, i) => share(String(4600 + i), n));
+  mockHttp.webJson = async (url) => {
+    if (url.includes("/mbox/group/listshare")) {
+      return makeApi({ msg_count: 1, msg_list: [{ msg_id: "m1", uk: 1, file_list: items }] });
+    }
+    if (url.includes("/mbox/msg/shareinfo")) return makeApi([]);
+    throw new Error("unexpected url " + url);
+  };
+  const result = await group.searchFiles("gid", "玄空飞星资料", { exact: true });
+  assert.deepEqual(result.results.map((r) => r.name), ["/玄空飞星资料"]);
+  // exact 对大小写不敏感（英文字母场景）
+  const items2 = [share("4700", "Report.pdf"), share("4701", "report.PDF"), share("4702", "report-final.pdf")];
+  mockHttp.webJson = async (url) => {
+    if (url.includes("/mbox/group/listshare")) {
+      return makeApi({ msg_count: 1, msg_list: [{ msg_id: "m1", uk: 1, file_list: items2 }] });
+    }
+    if (url.includes("/mbox/msg/shareinfo")) return makeApi([]);
+    throw new Error("unexpected url " + url);
+  };
+  const exactCase = await group.searchFiles("gid", "report.pdf", { exact: true });
+  assert.deepEqual(exactCase.results.map((r) => r.name).sort(), ["/Report.pdf", "/report.PDF"]);
+});

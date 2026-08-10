@@ -106,7 +106,8 @@ bdp gls <gid> <fs_id> [--page N] [--page-size N] [--from-uk X] [--msg-id Y] [--p
                                    # 浏览分享库内容（默认 page-size 50，最大 100）
 bdp gsearch <gid> <keyword>        # 搜索群文件名（全量遍历目录，缓存命中秒回）
     [--page N] [--limit N] [--depth N] [--concurrency N] [--max-pages N] [--max-requests N]
-    [--no-unique] [--all|--all-results] [--timeout N] [--save-partial] [--no-cache] [--verbose] [--json-file <path>]
+    [--no-unique] [--all|--all-results] [--timeout N] [--save-partial]
+    [--any-word] [--exact] [--no-cache] [--verbose] [--json-file <path>]
 bdp cache [clear]                  # 查看/清空会话缓存（~/.bdp/cache/，目录30min/分享5min）
 bdp error <code>                   # 查看错误码说明（如 -3 / 2131）
 ```
@@ -152,6 +153,7 @@ bdp gsearch 539478953581833690 "倪海厦" --json
 - 大目录搜索可用 `--concurrency 4`（默认）并发扫描；`--all`/`--all-results` 会忽略分页获取全部，不要作为默认行为
 - 深扫建议 `--timeout <秒>`：到点返回已搜到的部分结果（`timedOut:true`，不挂死）；`--save-partial` 在未完整时自动把已搜到的结果存为 JSON 并打印路径（配 `--json-file` 写指定文件，否则自动生成 `bdp-gsearch-<gid>-<kw>-partial-<时间戳>.json`），Agent 超时后直接读该文件续扫
 - gsearch JSON 含 `stoppedReason`（page-limit/budget/throttled/timeout/complete）与 `timedOut`，判断结果是否完整以 `complete`/`partial` 为准
+- **多关键词匹配**：关键词用空格分隔，默认"全部命中"（AND，可换序）→ `gsearch "玄空 飞星"` 只返回同时含"玄空"与"飞星"的名字（精确收窄）；`--any-word` 改为"任一命中"（OR，更宽）；`--exact` 按文件名精确匹配（忽略路径前缀）。单关键词默认仍是子串包含（兼容旧行为）
 
 ## 安全边界
 

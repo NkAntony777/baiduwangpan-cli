@@ -206,7 +206,7 @@ bdp gls 539478953581833690 742474845517885 --page 2 --page-size 50 --json
 ### gsearch — 搜索群文件名
 
 ```
-bdp gsearch <gid> <keyword> [--page <N>] [--limit <N>] [--depth <N>] [--concurrency <N>] [--max-pages <N>] [--max-requests <N>] [--no-unique] [--all|--all-results] [--timeout <N>] [--save-partial] [--no-cache] [--verbose] [--json-file <path>]
+bdp gsearch <gid> <keyword> [--page <N>] [--limit <N>] [--depth <N>] [--concurrency <N>] [--max-pages <N>] [--max-requests <N>] [--no-unique] [--all|--all-results] [--timeout <N>] [--save-partial] [--any-word] [--exact] [--no-cache] [--verbose] [--json-file <path>]
 ```
 
 - 搜索顶层分享 + 子目录文件名（`--depth N` 递归深度，默认 1）
@@ -219,6 +219,7 @@ bdp gsearch <gid> <keyword> [--page <N>] [--limit <N>] [--depth <N>] [--concurre
 - `--all`/`--all-results` 忽略分页获取全部（不作为默认，慢但完整）
 - `--timeout <N>`：到点停止扫描并返回已搜到的部分结果（`timedOut:true, complete:false, partial:true`），避免深扫挂死
 - `--save-partial`：未完整（超时/限流/预算/失败）时自动把已搜到的结果存为 JSON 并打印 `💾 部分结果已保存: <路径>`；配 `--json-file <path>` 写该文件，否则自动生成 `bdp-gsearch-<gid>-<kw>-partial-<时间戳>.json`（当前目录）。保存内容含 `saved:"partial"` + `results`（已搜到的全部匹配）+ 扫描诊断（scannedShares/totalShares/failedShares/stoppedReason/timedOut 等），可直接读取续扫
+- **多关键词**：关键词用空格分隔，默认"全部命中"（AND，可换序）→ `"玄空 飞星"` 只返回同时含"玄空"与"飞星"的名字（精确收窄，解决"玄空"命中 52 个、"玄空飞星"只命中 2 个的问题）；`--any-word` 改"任一命中"（OR）；`--exact` 按文件名精确匹配（忽略路径前缀，大小写不敏感）。单关键词默认仍是子串包含（兼容旧行为）
 - `--json-file <path>` 由 Node 直接写 UTF-8 文件，绕过 PowerShell 编码问题
 
 ```bash

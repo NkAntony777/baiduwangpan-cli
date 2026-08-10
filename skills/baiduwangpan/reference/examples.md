@@ -96,6 +96,16 @@ bdp gsearch <gid> "玄空飞星" --depth 3 --timeout 85 --save-partial --json-fi
 # （结果对象: saved:"partial", partial:true, timedOut:true, stoppedReason:"timeout", scannedShares/totalShares...）
 ```
 
+## 场景 10：多关键词收窄 / 放宽搜索
+
+用户：**"搜"玄空"命中太多了，只要同时含"飞星"的"**
+
+```bash
+bdp gsearch <gid> "玄空 飞星" --json            # 默认 AND：同时含"玄空"+"飞星"（可换序）
+bdp gsearch <gid> "玄空 飞星" --any-word --json # OR：含"玄空"或"飞星"（更宽）
+bdp gsearch <gid> "玄空飞星资料" --exact --json # 文件名精确匹配（忽略路径前缀）
+```
+
 ## 输出解析约定
 
 `--json` 输出结构：

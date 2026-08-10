@@ -91,6 +91,10 @@ function parseArgs(argv) {
       opts.flags.timeoutMs = parseInt(argv[++i], 10) || 0;
     } else if (arg === "--save-partial") {
       opts.flags.savePartial = true;
+    } else if (arg === "--any-word") {
+      opts.flags.anyWord = true;
+    } else if (arg === "--exact") {
+      opts.flags.exact = true;
     } else if (arg === "-n" || arg === "--lines") {
       opts.flags.n = parseInt(argv[++i], 10) || 20;
     } else if (arg === "-p" || arg === "--path") {
@@ -483,6 +487,8 @@ cmds.gsearch = async (args, json) => {
     concurrency: args.flags.concurrency || 4,
     unique: args.flags.unique !== false,
     all: args.flags.all === true,
+    exact: args.flags.exact === true,
+    anyWord: args.flags.anyWord === true,
     timeoutMs: args.flags.timeoutMs || (args.flags.timeout ? args.flags.timeout * 1000 : 0),
     depth: args.flags.depth || 1,
     maxPages: args.flags.maxPages || 50,
@@ -536,7 +542,7 @@ cmds.gsearch = async (args, json) => {
     );
   };
 
-  verboseLog(args, `gsearch gid=${gid} keyword="${keyword}" page=${opts.page} limit=${opts.limit} concurrency=${opts.concurrency} unique=${opts.unique} all=${opts.all} timeoutMs=${opts.timeoutMs} savePartial=${savePartial} depth=${opts.depth} maxPages=${opts.maxPages} maxRequests=${opts.maxRequests} cache=${opts.cache}`);
+  verboseLog(args, `gsearch gid=${gid} keyword="${keyword}" page=${opts.page} limit=${opts.limit} concurrency=${opts.concurrency} unique=${opts.unique} all=${opts.all} exact=${opts.exact} anyWord=${opts.anyWord} timeoutMs=${opts.timeoutMs} savePartial=${savePartial} depth=${opts.depth} maxPages=${opts.maxPages} maxRequests=${opts.maxRequests} cache=${opts.cache}`);
   const result = await group.searchFiles(gid, keyword, opts);
 
   if (result.partial) {
@@ -659,7 +665,8 @@ GROUP CHAT OPERATIONS (群聊)
   gsearch <gid> <keyword>    Search group file names (全量遍历目录, 缓存命中秒回)
                              [--page N] [--limit N] [--depth N] [--concurrency N]
                              [--max-pages N] [--max-requests N] [--no-unique]
-                             [--all|--all-results] [--timeout N] [--save-partial] [--no-cache]
+                             [--all|--all-results] [--timeout N] [--save-partial]
+                             [--any-word] [--exact] [--no-cache]
   cache [clear]              Show cache info or clear session cache
   error <code>               Explain an error code (e.g. -3)
 
@@ -692,6 +699,8 @@ OPTIONS
   --all, --all-results        Fetch all results, no paging (gsearch; slow but never truncates)
   --timeout <N>               Abort after N seconds and return partial results (gsearch; 0=unlimited)
   --save-partial              Auto-save partial results to JSON when scan is incomplete (gsearch)
+  --any-word                  Match ANY of the space-separated keywords (OR) (gsearch; default=ALL)
+  --exact                     Match exact file name (case-insensitive) instead of substring (gsearch)
 
 EXAMPLES
   bdp login --bduss abc123 --stoken def456

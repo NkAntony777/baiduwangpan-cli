@@ -146,7 +146,8 @@ bdp gtree <gid> [--depth N] [--concurrency N] [--max-nodes N]
 bdp gsearch <gid> <keyword>      搜索群文件名 (全量遍历目录)
                                   [--page N] [--limit N] [--depth N] [--concurrency N]
                                   [--max-pages N] [--max-requests N] [--no-unique]
-                                  [--all|--all-results] [--timeout N] [--save-partial] [--no-cache]
+                                  [--all|--all-results] [--timeout N] [--save-partial]
+                                  [--any-word] [--exact] [--no-cache]
 bdp cache [clear]                查看 / 清空会话缓存 (~/.bdp/cache/)
 ```
 
@@ -175,6 +176,8 @@ bdp cache [clear]                查看 / 清空会话缓存 (~/.bdp/cache/)
 --all, --all-results             忽略分页获取全部结果 (gsearch; 不限时, 慢但完整)
 --timeout <N>                    超时秒数，到点返回已扫到的部分结果 (gsearch; 0=不限时, 默认 0)
 --save-partial                    未完整时自动把已搜到的结果存为 JSON 并打印路径 (gsearch; 配 --json-file 时写该文件)
+--any-word                        空格分隔关键词命中任意一个即可 (gsearch; 默认=全部命中 AND)
+--exact                           按文件名精确匹配，忽略路径前缀 (gsearch; 大小写不敏感)
 --no-cache                       禁用会话缓存 (gsearch/gtree/gshares/gls)
 ```
 

@@ -90,6 +90,18 @@
      （scannedShares/totalShares/failedShares/stoppedReason/timedOut 等），Agent 可直接读取续扫
   4. 搜索完整时自动清理自动生成的占位文件，不留下垃圾
 
+
+---
+
+## 🆕 反馈 3（v1.1.3）：gsearch 多关键词匹配控制（--any-word / --exact）
+
+- **场景**：`gsearch "玄空"` 命中 52 个（短关键词子串匹配太宽），`gsearch "玄空飞星"` 只命中 2 个（长关键词太窄），相差 25 倍
+- **已实现**：
+  1. **空格分隔多关键词**：`gsearch "玄空 飞星"` 默认**全部命中**（AND，可换序）→ 只返回同时含"玄空"与"飞星"的名字，精确收窄
+  2. **`--any-word`**：任一关键词命中即可（OR，更宽）
+  3. **`--exact`**：按文件名精确匹配（忽略路径前缀，大小写不敏感）
+  4. 单关键词行为不变（子串包含，兼容旧行为）
+
 ## 🔧 修复状态（本仓库已实现，建议随 v1.1.1 发布）
 
 | 问题 | 修复 | 涉及文件 |
@@ -99,5 +111,6 @@
 | gsearch 超时无返回 | `complete`/`partial` 语义修正（提前截断不再误报 `complete:true`，新增 `stoppedReason`）；`--timeout N` 到点返回部分结果（`complete:false, partial:true, timedOut:true`）；`--json-file` 扫描中持续写部分结果（`onProgress`）；`--all-results` 作为 `--all` 别名 | `lib/group.js`、`bin/bdp.js` |
 | 文档 | README 同步 `--all-results`/`--timeout`/`--save-partial`/升级说明；新增本报告 | `README.md`、`docs/upgrade-report-bdp-1.1.0.md` |
 | gsearch 部分结果难获取 | 新增 `--save-partial`：未完整时自动落盘已搜到的结果（自动路径或 `--json-file`）并打印路径 | `lib/partial.js`、`bin/bdp.js` |
+| gsearch 关键词宽窄不可控 | 空格分隔多关键词默认 AND；新增 `--any-word`（OR）、`--exact`（文件名精确匹配） | `lib/group.js`、`bin/bdp.js` |
 
-**回归测试**：`npm test` 30/30 通过（新增 pcsPath 自动发现/回退、complete/partial 语义、timeout 部分结果、onProgress、`lib/partial.js` 用例）。
+**回归测试**：`npm test` 34/34 通过（新增 pcsPath 自动发现/回退、complete/partial 语义、timeout 部分结果、onProgress、`lib/partial.js`、多关键词 AND/OR/exact 用例）。
