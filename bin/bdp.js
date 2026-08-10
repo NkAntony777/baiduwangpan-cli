@@ -34,6 +34,7 @@
 const { config } = require("../lib");
 const pan = require("../lib/pan");
 const group = require("../lib/group");
+const partial = require("../lib/partial");
 
 // ── Utils ──────────────────────────────────────────────
 
@@ -88,6 +89,8 @@ function parseArgs(argv) {
       opts.flags.timeout = parseInt(argv[++i], 10) || 0;
     } else if (arg === "--timeout-ms") {
       opts.flags.timeoutMs = parseInt(argv[++i], 10) || 0;
+    } else if (arg === "--save-partial") {
+      opts.flags.savePartial = true;
     } else if (arg === "-n" || arg === "--lines") {
       opts.flags.n = parseInt(argv[++i], 10) || 20;
     } else if (arg === "-p" || arg === "--path") {
@@ -487,20 +490,26 @@ cmds.gsearch = async (args, json) => {
     cache: args.flags.noCache !== true,
   };
 
-  // --json-file：扫描过程中持续写部分结果，即使被外部超时/杀掉，部分结果也已落盘
+  // --save-partial：未完整（超时/限流/预算/失败）时自动把已搜到的结果落盘；
+  // 未指定 --json-file 时自动生成路径（bdp-gsearch-<gid>-<kw>-partial-<ts>.json）
+  const savePartial = args.flags.savePartial === true;
   const jsonFile = args.flags.jsonFile;
+  const partialFile = jsonFile || (savePartial ? partial.defaultPartialFile(gid, keyword) : null);
   const fsMod = require("fs");
+
+  // 扫描过程中持续写部分结果（--json-file 或 --save-partial 自动文件），
+  // 即使被外部超时/杀掉，已搜到的结果也已落盘
   let lastProgressWrite = 0;
-  if (jsonFile) {
-    fsMod.writeFileSync(jsonFile, JSON.stringify({ running: true, results: [], complete: false, partial: true }, null, 2), "utf-8");
+  if (partialFile) {
+    fsMod.writeFileSync(partialFile, JSON.stringify({ running: true, results: [], complete: false, partial: true }, null, 2), "utf-8");
   }
   opts.onProgress = (snap) => {
-    if (!jsonFile) return;
+    if (!partialFile) return;
     const now = Date.now();
     if (snap.running && now - lastProgressWrite < 400) return; // 节流，避免频繁写盘
     lastProgressWrite = now;
     fsMod.writeFileSync(
-      jsonFile,
+      partialFile,
       JSON.stringify(
         {
           running: snap.running,
@@ -527,7 +536,7 @@ cmds.gsearch = async (args, json) => {
     );
   };
 
-  verboseLog(args, `gsearch gid=${gid} keyword="${keyword}" page=${opts.page} limit=${opts.limit} concurrency=${opts.concurrency} unique=${opts.unique} all=${opts.all} timeoutMs=${opts.timeoutMs} depth=${opts.depth} maxPages=${opts.maxPages} maxRequests=${opts.maxRequests} cache=${opts.cache}`);
+  verboseLog(args, `gsearch gid=${gid} keyword="${keyword}" page=${opts.page} limit=${opts.limit} concurrency=${opts.concurrency} unique=${opts.unique} all=${opts.all} timeoutMs=${opts.timeoutMs} savePartial=${savePartial} depth=${opts.depth} maxPages=${opts.maxPages} maxRequests=${opts.maxRequests} cache=${opts.cache}`);
   const result = await group.searchFiles(gid, keyword, opts);
 
   if (result.partial) {
@@ -542,10 +551,7 @@ cmds.gsearch = async (args, json) => {
 
   if (args.flags.legacyJson) {
     emitJson(result.results, args);
-    return;
-  }
-
-  if (args.flags.jsonFile || json) {
+  } else if (args.flags.jsonFile || json) {
     emitJson(result, args);
   } else {
     console.log(`${result.returned} matches for "${keyword}"${result.hasMore ? " (has more — use --page " + (result.nextPage || "?") + ")" : ""}:\n`);
@@ -560,6 +566,21 @@ cmds.gsearch = async (args, json) => {
     } else if (result.partial) {
       console.error(`[verbose] ${result.failedShares} shares failed (partial result)`);
     }
+  }
+
+  // --save-partial：未完整时把已搜到的结果写盘并告知路径（stderr，不污染 JSON stdout）
+  if (savePartial && partialFile && result.partial) {
+    if (!jsonFile) {
+      fsMod.writeFileSync(
+        partialFile,
+        JSON.stringify(partial.buildPartialPayload(result, { gid, keyword }), null, 2),
+        "utf-8"
+      );
+    }
+    console.error(`💾 部分结果已保存: ${partialFile}`);
+  } else if (savePartial && partialFile && !result.partial && !jsonFile) {
+    // 自动生成的文件且搜索完整 → 清理占位文件，避免留下垃圾
+    try { fsMod.unlinkSync(partialFile); } catch {}
   }
 };
 
@@ -638,7 +659,7 @@ GROUP CHAT OPERATIONS (群聊)
   gsearch <gid> <keyword>    Search group file names (全量遍历目录, 缓存命中秒回)
                              [--page N] [--limit N] [--depth N] [--concurrency N]
                              [--max-pages N] [--max-requests N] [--no-unique]
-                             [--all|--all-results] [--timeout N] [--no-cache]
+                             [--all|--all-results] [--timeout N] [--save-partial] [--no-cache]
   cache [clear]              Show cache info or clear session cache
   error <code>               Explain an error code (e.g. -3)
 
@@ -670,6 +691,7 @@ OPTIONS
   --no-unique                 Keep duplicates from different msgId (gsearch)
   --all, --all-results        Fetch all results, no paging (gsearch; slow but never truncates)
   --timeout <N>               Abort after N seconds and return partial results (gsearch; 0=unlimited)
+  --save-partial              Auto-save partial results to JSON when scan is incomplete (gsearch)
 
 EXAMPLES
   bdp login --bduss abc123 --stoken def456

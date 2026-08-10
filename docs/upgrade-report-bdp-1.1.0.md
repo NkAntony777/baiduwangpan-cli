@@ -73,6 +73,23 @@
 
 ---
 
+
+---
+
+## 🆕 反馈 2（v1.1.2）：gsearch 加 --save-partial
+
+- **场景**：搜索跑着跑着超时了，结果已写到 json-file 一半，但没机会看
+- **期望**：超时/未完整时自动把已搜到的 result 写入 json-file
+- **现状痛点**：只能靠手动看 `partial: true` 才知道有部分结果
+- **已实现**：
+  1. `--save-partial` 单独用时自动生成 `bdp-gsearch-<gid>-<kw>-partial-<时间戳>.json`（当前目录），
+     扫描中持续写入部分结果，未完整（超时/限流/预算/失败）时写入最终 partial 快照并打印路径
+  2. `--save-partial --json-file out.json` 时写 `out.json`（兼容原 `--json-file` 行为），
+     未完整时打印 `💾 部分结果已保存: out.json`
+  3. 保存内容含 `saved:"partial"` + `results`（已搜到的全部匹配）+ 扫描诊断
+     （scannedShares/totalShares/failedShares/stoppedReason/timedOut 等），Agent 可直接读取续扫
+  4. 搜索完整时自动清理自动生成的占位文件，不留下垃圾
+
 ## 🔧 修复状态（本仓库已实现，建议随 v1.1.1 发布）
 
 | 问题 | 修复 | 涉及文件 |
@@ -80,6 +97,7 @@
 | pcsPath 丢失 | `findPCS()` 自动发现版本子目录（`BaiduPCS-Go-v*/`）；config 里失效的绝对 `pcsPath` 自动回退到自动发现；`setAuth` 只替换认证字段、保留 `pcsPath` | `lib/config.js` |
 | postinstall fallback 崩溃 | `download()` 补 file stream `error` 处理（不再"只跑 1 行就抛出"）；镜像顺序改为 ghfast/ghproxy 优先、GitHub 兜底；全部失败时打印每个源的完整下载地址；发现版本子目录二进制时提升到固定路径 | `scripts/postinstall.js` |
 | gsearch 超时无返回 | `complete`/`partial` 语义修正（提前截断不再误报 `complete:true`，新增 `stoppedReason`）；`--timeout N` 到点返回部分结果（`complete:false, partial:true, timedOut:true`）；`--json-file` 扫描中持续写部分结果（`onProgress`）；`--all-results` 作为 `--all` 别名 | `lib/group.js`、`bin/bdp.js` |
-| 文档 | README 同步 `--all-results`/`--timeout`/升级说明；新增本报告 | `README.md`、`docs/upgrade-report-bdp-1.1.0.md` |
+| 文档 | README 同步 `--all-results`/`--timeout`/`--save-partial`/升级说明；新增本报告 | `README.md`、`docs/upgrade-report-bdp-1.1.0.md` |
+| gsearch 部分结果难获取 | 新增 `--save-partial`：未完整时自动落盘已搜到的结果（自动路径或 `--json-file`）并打印路径 | `lib/partial.js`、`bin/bdp.js` |
 
-**回归测试**：`npm test` 27/27 通过（新增 pcsPath 自动发现/回退、complete/partial 语义、timeout 部分结果、onProgress 用例）。
+**回归测试**：`npm test` 30/30 通过（新增 pcsPath 自动发现/回退、complete/partial 语义、timeout 部分结果、onProgress、`lib/partial.js` 用例）。

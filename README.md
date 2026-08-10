@@ -146,7 +146,7 @@ bdp gtree <gid> [--depth N] [--concurrency N] [--max-nodes N]
 bdp gsearch <gid> <keyword>      搜索群文件名 (全量遍历目录)
                                   [--page N] [--limit N] [--depth N] [--concurrency N]
                                   [--max-pages N] [--max-requests N] [--no-unique]
-                                  [--all|--all-results] [--timeout N] [--no-cache]
+                                  [--all|--all-results] [--timeout N] [--save-partial] [--no-cache]
 bdp cache [clear]                查看 / 清空会话缓存 (~/.bdp/cache/)
 ```
 
@@ -174,6 +174,7 @@ bdp cache [clear]                查看 / 清空会话缓存 (~/.bdp/cache/)
 --no-unique                      保留不同 msgId 的重复项 (gsearch)
 --all, --all-results             忽略分页获取全部结果 (gsearch; 不限时, 慢但完整)
 --timeout <N>                    超时秒数，到点返回已扫到的部分结果 (gsearch; 0=不限时, 默认 0)
+--save-partial                    未完整时自动把已搜到的结果存为 JSON 并打印路径 (gsearch; 配 --json-file 时写该文件)
 --no-cache                       禁用会话缓存 (gsearch/gtree/gshares/gls)
 ```
 
