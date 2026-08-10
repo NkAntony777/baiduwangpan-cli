@@ -429,3 +429,92 @@ test("listShares paginates with last_msg_time cursor when has_more=1", async () 
   assert.equal(shares.length, 2);
   assert.deepEqual(shares.map((s) => s.fsId).sort(), ["1", "2"]);
 });
+
+test("searchFiles reports complete:false/partial:true when page fills before full scan", async () => {
+  // 30 个匹配的顶层分享，limit=5 → 第 1 页填满即停，未扫完全部
+  const items = [];
+  for (let i = 0; i < 30; i++) items.push(share(String(2000 + i), "F" + String(i).padStart(2, "0") + " 报告"));
+  mockHttp.webJson = async (url) => {
+    if (url.includes("/mbox/group/listshare")) {
+      return makeApi({ msg_count: 1, msg_list: [{ msg_id: "m1", uk: 1, file_list: items }] });
+    }
+    if (url.includes("/mbox/msg/shareinfo")) {
+      return makeApi([]);
+    }
+    throw new Error("unexpected url " + url);
+  };
+
+  const result = await group.searchFiles("gid", "报告", { page: 1, limit: 5 });
+  assert.equal(result.results.length, 5);
+  assert.equal(result.hasMore, true);
+  assert.equal(result.complete, false, "page 填满即停，不应 complete:true");
+  assert.equal(result.partial, true);
+  assert.equal(result.stoppedReason, "page-limit");
+  assert.ok(result.scannedShares < result.totalShares);
+});
+
+test("searchFiles complete:true only when whole share set scanned without failures", async () => {
+  const items = [];
+  for (let i = 0; i < 3; i++) items.push(share(String(2100 + i), "G" + String(i) + " 报告"));
+  mockHttp.webJson = async (url) => {
+    if (url.includes("/mbox/group/listshare")) {
+      return makeApi({ msg_count: 1, msg_list: [{ msg_id: "m1", uk: 1, file_list: items }] });
+    }
+    if (url.includes("/mbox/msg/shareinfo")) {
+      return makeApi([]);
+    }
+    throw new Error("unexpected url " + url);
+  };
+
+  const result = await group.searchFiles("gid", "报告", { page: 1, limit: 50 });
+  assert.equal(result.complete, true);
+  assert.equal(result.partial, false);
+  assert.equal(result.stoppedReason, "complete");
+  assert.equal(result.hasMore, false);
+});
+
+test("searchFiles returns partial results on timeout (complete:false, partial:true, timedOut:true)", async () => {
+  mockHttp.webJson = async (url) => {
+    if (url.includes("/mbox/group/listshare")) {
+      return makeApi({ msg_count: 1, msg_list: [{ msg_id: "m1", uk: 1, file_list: [share("3000", "T1", { isdir: "1" })] }] });
+    }
+    if (url.includes("/mbox/msg/shareinfo")) {
+      await new Promise((r) => setTimeout(r, 60));
+      return makeApi([share("3001", "T 报告")]);
+    }
+    throw new Error("unexpected url " + url);
+  };
+
+  const result = await group.searchFiles("gid", "报告", { timeoutMs: 1, limit: 50 });
+  assert.equal(result.timedOut, true);
+  assert.equal(result.complete, false);
+  assert.equal(result.partial, true);
+  assert.equal(result.stoppedReason, "timeout");
+});
+
+test("searchFiles onProgress reports running snapshots and final state", async () => {
+  const items = [];
+  for (let i = 0; i < 3; i++) items.push(share(String(2200 + i), "H" + String(i) + " 报告", { isdir: "1" }));
+  mockHttp.webJson = async (url) => {
+    if (url.includes("/mbox/group/listshare")) {
+      return makeApi({ msg_count: 1, msg_list: [{ msg_id: "m1", uk: 1, file_list: items }] });
+    }
+    if (url.includes("/mbox/msg/shareinfo")) {
+      return makeApi([]);
+    }
+    throw new Error("unexpected url " + url);
+  };
+
+  const snapshots = [];
+  const result = await group.searchFiles("gid", "报告", {
+    limit: 50,
+    onProgress: (snap) => snapshots.push(snap),
+  });
+  assert.ok(snapshots.length >= 2, "至少一次 running + 一次 final");
+  assert.ok(snapshots.some((s) => s.running === true), "有 running 快照");
+  const finalSnap = snapshots[snapshots.length - 1];
+  assert.equal(finalSnap.running, false);
+  assert.equal(finalSnap.complete, true);
+  assert.equal(finalSnap.partial, false);
+  assert.equal(result.complete, true);
+});

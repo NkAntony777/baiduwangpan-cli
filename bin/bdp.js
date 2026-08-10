@@ -82,8 +82,12 @@ function parseArgs(argv) {
       opts.flags.unique = true;
     } else if (arg === "--no-unique") {
       opts.flags.unique = false;
-    } else if (arg === "--all") {
+    } else if (arg === "--all" || arg === "--all-results") {
       opts.flags.all = true;
+    } else if (arg === "--timeout") {
+      opts.flags.timeout = parseInt(argv[++i], 10) || 0;
+    } else if (arg === "--timeout-ms") {
+      opts.flags.timeoutMs = parseInt(argv[++i], 10) || 0;
     } else if (arg === "-n" || arg === "--lines") {
       opts.flags.n = parseInt(argv[++i], 10) || 20;
     } else if (arg === "-p" || arg === "--path") {
@@ -476,13 +480,54 @@ cmds.gsearch = async (args, json) => {
     concurrency: args.flags.concurrency || 4,
     unique: args.flags.unique !== false,
     all: args.flags.all === true,
+    timeoutMs: args.flags.timeoutMs || (args.flags.timeout ? args.flags.timeout * 1000 : 0),
     depth: args.flags.depth || 1,
     maxPages: args.flags.maxPages || 50,
     maxRequests: args.flags.maxRequests || 400,
     cache: args.flags.noCache !== true,
   };
 
-  verboseLog(args, `gsearch gid=${gid} keyword="${keyword}" page=${opts.page} limit=${opts.limit} concurrency=${opts.concurrency} unique=${opts.unique} all=${opts.all} depth=${opts.depth} maxPages=${opts.maxPages} maxRequests=${opts.maxRequests} cache=${opts.cache}`);
+  // --json-file：扫描过程中持续写部分结果，即使被外部超时/杀掉，部分结果也已落盘
+  const jsonFile = args.flags.jsonFile;
+  const fsMod = require("fs");
+  let lastProgressWrite = 0;
+  if (jsonFile) {
+    fsMod.writeFileSync(jsonFile, JSON.stringify({ running: true, results: [], complete: false, partial: true }, null, 2), "utf-8");
+  }
+  opts.onProgress = (snap) => {
+    if (!jsonFile) return;
+    const now = Date.now();
+    if (snap.running && now - lastProgressWrite < 400) return; // 节流，避免频繁写盘
+    lastProgressWrite = now;
+    fsMod.writeFileSync(
+      jsonFile,
+      JSON.stringify(
+        {
+          running: snap.running,
+          results: snap.results,
+          page: snap.page,
+          pageSize: snap.pageSize,
+          complete: snap.complete,
+          partial: snap.partial,
+          timedOut: snap.timedOut,
+          stoppedReason: snap.stoppedReason,
+          scannedShares: snap.scannedShares,
+          totalShares: snap.totalShares,
+          failedShares: snap.failedShares,
+          throttledShares: snap.throttledShares,
+          cachedDirs: snap.cachedDirs,
+          budgetUsed: snap.budgetUsed,
+          depth: snap.depth,
+          maxPages: snap.maxPages,
+        },
+        null,
+        2
+      ),
+      "utf-8"
+    );
+  };
+
+  verboseLog(args, `gsearch gid=${gid} keyword="${keyword}" page=${opts.page} limit=${opts.limit} concurrency=${opts.concurrency} unique=${opts.unique} all=${opts.all} timeoutMs=${opts.timeoutMs} depth=${opts.depth} maxPages=${opts.maxPages} maxRequests=${opts.maxRequests} cache=${opts.cache}`);
   const result = await group.searchFiles(gid, keyword, opts);
 
   if (result.partial) {
@@ -508,7 +553,9 @@ cmds.gsearch = async (args, json) => {
       const dir = r.isDir ? "[DIR] " : "      ";
       console.log(`  ${dir}${r.path || r.name}  ${formatSize(r.size)}  fs_id:${r.fsId}`);
     });
-    if (result.throttled) {
+    if (result.timedOut) {
+      console.error(`⚠️  搜索超时（${Math.round(opts.timeoutMs / 1000)}s），已返回部分结果（complete:false, partial:true）。重跑或增大 --timeout / 用 --all-results 不限时`);
+    } else if (result.throttled) {
       console.error(`⚠️  API 限流中断（已扫描 ${result.scannedShares}/${result.totalShares} 分享，失败 ${result.failedShares}）。重跑命令可续扫（磁盘缓存加速）`);
     } else if (result.partial) {
       console.error(`[verbose] ${result.failedShares} shares failed (partial result)`);
@@ -590,7 +637,8 @@ GROUP CHAT OPERATIONS (群聊)
                              [--page N] [--page-size N] [--from-uk X] [--msg-id Y] [--parent-fs-id Z]
   gsearch <gid> <keyword>    Search group file names (全量遍历目录, 缓存命中秒回)
                              [--page N] [--limit N] [--depth N] [--concurrency N]
-                             [--max-pages N] [--max-requests N] [--no-unique] [--all] [--no-cache]
+                             [--max-pages N] [--max-requests N] [--no-unique]
+                             [--all|--all-results] [--timeout N] [--no-cache]
   cache [clear]              Show cache info or clear session cache
   error <code>               Explain an error code (e.g. -3)
 
@@ -620,7 +668,8 @@ OPTIONS
   --concurrency <N>           Parallel share scans for gsearch/gtree (default 4)
   --no-cache                  Disable in-process session cache (gsearch/gtree/gshares/gls)
   --no-unique                 Keep duplicates from different msgId (gsearch)
-  --all                       Fetch all results, no paging (gsearch, not Agent default)
+  --all, --all-results        Fetch all results, no paging (gsearch; slow but never truncates)
+  --timeout <N>               Abort after N seconds and return partial results (gsearch; 0=unlimited)
 
 EXAMPLES
   bdp login --bduss abc123 --stoken def456

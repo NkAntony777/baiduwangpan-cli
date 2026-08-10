@@ -54,7 +54,8 @@
 npm install -g baiduwangpan-cli
 ```
 
-安装时会**自动下载** BaiduPCS-Go 引擎（支持 GitHub 镜像加速，国内也能装）。也支持手动克隆：
+安装时会**自动下载** BaiduPCS-Go 引擎（镜像优先加速，国内也能装；全部下载源失败时打印手动下载地址，不阻断安装）。
+CLI 会自动发现引擎（包根固定路径或 `BaiduPCS-Go-v4.0.1-windows-x64/` 版本子目录），升级不会丢 `pcsPath` 配置。也支持手动克隆：
 
 ```bash
 git clone https://github.com/NkAntony777/baiduwangpan-cli.git
@@ -144,7 +145,8 @@ bdp gtree <gid> [--depth N] [--concurrency N] [--max-nodes N]
                                   [--max-pages N] [--max-requests N] [--no-cache]   构建群目录树
 bdp gsearch <gid> <keyword>      搜索群文件名 (全量遍历目录)
                                   [--page N] [--limit N] [--depth N] [--concurrency N]
-                                  [--max-pages N] [--max-requests N] [--no-unique] [--all] [--no-cache]
+                                  [--max-pages N] [--max-requests N] [--no-unique]
+                                  [--all|--all-results] [--timeout N] [--no-cache]
 bdp cache [clear]                查看 / 清空会话缓存 (~/.bdp/cache/)
 ```
 
@@ -170,7 +172,8 @@ bdp cache [clear]                查看 / 清空会话缓存 (~/.bdp/cache/)
 --from-uk <X> / --msg-id <Y>     分享来源参数 (gls 子目录)
 --parent-fs-id <Z>               父目录 fsId (gls, errno=-3 时回退用)
 --no-unique                      保留不同 msgId 的重复项 (gsearch)
---all                            忽略分页获取全部结果 (gsearch, 非默认)
+--all, --all-results             忽略分页获取全部结果 (gsearch; 不限时, 慢但完整)
+--timeout <N>                    超时秒数，到点返回已扫到的部分结果 (gsearch; 0=不限时, 默认 0)
 --no-cache                       禁用会话缓存 (gsearch/gtree/gshares/gls)
 ```
 
@@ -343,6 +346,7 @@ skills/baiduwangpan/
 - **下载限速**：非 SVIP 用户下载受百度限速策略限制
 - **cat 限制**：为防止误读超大文件，`cat` 默认限制 1MB，可通过 `BDP_MAX_CAT_BYTES` 环境变量调整
 - **群聊文件**：群聊 API 为逆向获取，可能随百度服务端变更而失效
+- **1.1.0 升级**：若引擎丢失（postinstall 网络失败），CLI 会自动发现 `BaiduPCS-Go-v*` 版本子目录中的二进制；config 里失效的绝对 `pcsPath` 也会自动回退到自动发现，无需手改配置
 
 ## 🤝 致谢
 

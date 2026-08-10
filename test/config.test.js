@@ -34,3 +34,31 @@ test("setAuth replaces all transport-specific authentication state", () => {
     maxBytes: 2048,
   });
 });
+
+test("findPCS discovers binary inside versioned subdirectory", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "bdp-pcs-dir-"));
+  try {
+    const sub = path.join(dir, "BaiduPCS-Go-v4.0.1-windows-x64");
+    fs.mkdirSync(sub);
+    const exe = path.join(sub, "BaiduPCS-Go.exe");
+    fs.writeFileSync(exe, "dummy");
+    assert.equal(config.findPCSInDir(dir), exe);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("resolvePcsPath keeps a valid stored absolute path", () => {
+  const auto = config.findPCS();
+  assert.ok(auto, "auto-discovery should find a binary in this repo");
+  assert.equal(config.resolvePcsPath({ pcsPath: auto }), auto);
+});
+
+test("resolvePcsPath falls back to auto-discovery when stored absolute path is dead (1.1.0 upgrade loss)", () => {
+  const auto = config.findPCS();
+  const dead = path.join(os.tmpdir(), "no-such-BaiduPCS-Go.exe");
+  assert.equal(config.resolvePcsPath({ pcsPath: dead }), auto);
+  // 裸命令名（PATH 查找）保持原样
+  assert.equal(config.resolvePcsPath({ pcsPath: "BaiduPCS-Go" }), "BaiduPCS-Go");
+  assert.equal(config.resolvePcsPath({}), auto);
+});
