@@ -42,7 +42,9 @@
 | **列出群组** | `bdp groups` | 所有群聊 + gid |
 | **群内分享库** | `bdp gshares <gid>` | 顶层分享目录 |
 | **浏览群文件** | `bdp gls <gid> <fs_id>` | 分页 + 递归 |
-| **搜索群文件** | `bdp gsearch <gid> "关键词"` | 按文件名搜索 |
+| **搜索群文件** | `bdp gsearch <gid> "关键词"` | 按文件名搜索（缓存命中秒回） |
+| 群目录树 | `bdp gtree <gid>` | BFS 构建目录树 |
+| 群缓存管理 | `bdp cache [clear]` | 查看 / 清空会话缓存 |
 
 ## 🚀 快速开始
 
@@ -135,21 +137,41 @@ bdp rm <path>                    删除文件/目录
 
 ```
 bdp groups                       列出所有群组
-bdp gshares <gid>                列出群内分享库
-bdp gls <gid> <fs_id> [--page N] 浏览分享库内容
-bdp gsearch <gid> <keyword>      搜索群文件名
+bdp gshares <gid> [--no-cache]    列出群内分享库 (自动游标翻页)
+bdp gls <gid> <fs_id> [--page N] [--page-size N] [--from-uk X] [--msg-id Y]
+                                  [--parent-fs-id Z] [--no-cache]   浏览分享库内容
+bdp gtree <gid> [--depth N] [--concurrency N] [--max-nodes N]
+                                  [--max-pages N] [--max-requests N] [--no-cache]   构建群目录树
+bdp gsearch <gid> <keyword>      搜索群文件名 (全量遍历目录)
+                                  [--page N] [--limit N] [--depth N] [--concurrency N]
+                                  [--max-pages N] [--max-requests N] [--no-unique] [--all] [--no-cache]
+bdp cache [clear]                查看 / 清空会话缓存 (~/.bdp/cache/)
 ```
 
 ### 通用选项
 
 ```
 --json                           JSON 结构化输出 (Agent 友好)
+--json-file <path>               JSON 写入文件 (UTF-8, 绕开控制台编码)
+--verbose                        进度/日志只写 stderr
 -n <N>                           行数 (head/tail, 默认 20)
 -p <path>                        搜索路径 (search, 默认 /)
 -i                               忽略大小写 (grep)
 -N                               显示行号 (cat/grep)
 -o <dir>                         输出目录 (get)
---page <N>                       页码 (gls)
+--page <N>                       页码 (gls/gsearch, 默认 1)
+--page-size <N>                  每页条数 (gls, 默认 50, 最大 100)
+--limit <N>                      每页条数 (gsearch, 默认 50)
+--depth <N>                      递归深度 (gsearch 默认 1 / gtree 默认 2)
+--concurrency <N>                并发扫描数 (gsearch/gtree, 默认 4, 1-8)
+--max-nodes <N>                  树节点上限 (gtree, 默认 2000)
+--max-pages <N>                  单目录最大页数 (gsearch/gtree, 默认 50, 100 条/页)
+--max-requests <N>               单命令请求预算 (gsearch/gtree, 默认 400, 防限流)
+--from-uk <X> / --msg-id <Y>     分享来源参数 (gls 子目录)
+--parent-fs-id <Z>               父目录 fsId (gls, errno=-3 时回退用)
+--no-unique                      保留不同 msgId 的重复项 (gsearch)
+--all                            忽略分页获取全部结果 (gsearch, 非默认)
+--no-cache                       禁用会话缓存 (gsearch/gtree/gshares/gls)
 ```
 
 ## 🤖 Agent 集成示例
@@ -244,7 +266,7 @@ bdp groups                          bdp gshares <gid>
 
 - 群聊文件**没有服务端搜索接口**（`listshare`/`shareinfo` 的 `key`/`keyword` 参数被忽略，`/api/search` 不支持群维度）——网页端搜索同样是客户端遍历，`gsearch` 走的是同一条路。
 - `shareinfo` 每页**硬上限 100 条**（`num>100` 不返回更多），`page` 翻页可用 → `gsearch`/`gtree` 自动全页遍历，不再漏数据。
-- 高频调用会触发限流，表现为 `errno=-3`、**self-echo**（`errno=0` 但返回目录自身）、或空列表；工具自动退避重试、连续限流停止扫描，重跑命令即续扫。
+- 高频调用会触发限流，表现为 `errno=-3`、**self-echo**（`errno=0` 但返回目录自身）、或空列表；工具自动退避重试、连续限流停止扫描，重跑命令即续扫（`--max-requests` 可控制单命令请求预算，默认 400）。
 - 群文件路径可能含**非法百分号编码**（裸 `%`），直接 `decodeURIComponent` 会抛 `URIError` 报废整个目录 → 已改为安全解码。
 - `gsearch`/`gtree`/`gshares` 默认启用**磁盘会话缓存**（目录 30min / 分享 5min，`~/.bdp/cache/`，`--no-cache` 关闭、`bdp cache clear` 清理）——重复搜索秒回，深扫续扫收敛。
 
