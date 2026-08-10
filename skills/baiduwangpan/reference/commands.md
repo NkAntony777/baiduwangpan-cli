@@ -181,28 +181,71 @@ bdp gshares 539478953581833690 --json
 ### gls — 浏览分享库内容
 
 ```
-bdp gls <gid> <fs_id> [--page <N>]
+bdp gls <gid> <fs_id> [--page <N>] [--page-size <N>] [--from-uk <X>] [--msg-id <Y>] [--parent-fs-id <Z>]
 ```
 
 - 浏览分享库内的文件和子目录
-- 超过 100 项用 `--page` 翻页
+- `--page-size` 默认 50，最大 100
+- 子目录自动携带 `parentFsId`/`fromUk`/`msgId` 来源信息
+- 若目标 fsId 不是顶层分享且未提供来源，会报错并提示传入 `--from-uk --msg-id`（不再猜测）
 
 ```bash
 bdp gls 539478953581833690 742474845517885
-bdp gls 539478953581833690 742474845517885 --page 2 --json
+bdp gls 539478953581833690 292608024165826 --from-uk 2642611875 --msg-id 5069931974377329661 --json
+bdp gls 539478953581833690 742474845517885 --page 2 --page-size 50 --json
 ```
+
+**errno=-3 处理**：gls 遇到群分享 API 拒绝（errno=-3）时自动依次尝试 page-size 50→20→10；仍失败时：
+- 传入 `--parent-fs-id` → 自动列出父目录，返回 `fallback: {reason:"errno=-3", resolvedFsId: <父目录>, level:"parent"}`
+- 目标为顶层分享 → 退回 gshares 结果，`fallback.level: "group-shares"`
+- Agent 应依据 fallback 从父目录换路径继续遍历
 
 ### gsearch — 搜索群文件名
 
 ```
-bdp gsearch <gid> <keyword>
+bdp gsearch <gid> <keyword> [--page <N>] [--limit <N>] [--concurrency <N>] [--no-unique] [--all] [--verbose] [--json-file <path>]
 ```
 
-- 搜索顶层分享库 + 第一层子目录的文件名
+- 搜索顶层分享 + 第一层子目录的文件名
+- 默认 `--limit 50`，**只取一页**；`hasMore: true` 时用 `--page` 翻页
+- 默认去重（相同 fsId 不同 msgId 只返回一次）；`--no-unique` 保留全部来源
+- `--concurrency 4` 并发扫描分享目录（1-8），稀疏关键词时提前停止
+- `--all` 忽略分页获取全部（不作为默认）
+- `--json-file <path>` 由 Node 直接写 UTF-8 文件，绕过 PowerShell 编码问题
 
 ```bash
 bdp gsearch 539478953581833690 "倪海厦"
-bdp gsearch 539478953581833690 "古籍" --json
+bdp gsearch 539478953581833690 "古籍" --page 2 --limit 20 --json
+bdp gsearch 539478953581833690 "紫微" --no-unique --json
+bdp gsearch 539478953581833690 "资料" --limit 50 --json-file result.json
+```
+
+**JSON 返回结构**：
+```json
+{
+  "results": [ { "name": "...", "path": "...", "isDir": true, "size": 0,
+                 "fsId": "...", "parentFsId": "...", "fromUk": "...", "msgId": "...", "group": "..." } ],
+  "page": 1, "pageSize": 50, "returned": 5,
+  "total": null, "hasMore": true, "nextPage": 2,
+  "unique": true, "complete": false, "partial": false,
+  "scannedShares": 7, "totalShares": 73, "failedShares": 0
+}
+```
+
+- `hasMore`/`nextPage`：翻页依据
+- `complete`：是否扫描完所有分享；`partial`：是否有分享失败（结果不完整）
+- `scannedShares`/`totalShares`/`failedShares`：扫描进度元数据
+
+### error — 错误码说明
+
+```
+bdp error <code>
+```
+
+```bash
+bdp error -3
+# 群分享 API 拒绝请求。已观察到大目录、错误的 msgId/fromUk、过期分享都可能触发。
+# 处理：减小 --page-size（自动重试 50→20→10），或携带 gsearch 返回的 fromUk/msgId/parentFsId 信息重试
 ```
 
 ## 配置命令

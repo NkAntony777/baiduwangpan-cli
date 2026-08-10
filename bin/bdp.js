@@ -52,12 +52,38 @@ function output(data, jsonFlag, formatter) {
   }
 }
 
+function emitJson(data, args) {
+  const json = JSON.stringify(data, null, 2);
+  if (args.flags.jsonFile) {
+    require("fs").writeFileSync(args.flags.jsonFile, json, "utf-8");
+    console.log(args.flags.jsonFile);
+  } else {
+    console.log(json);
+  }
+}
+
+function verboseLog(args, msg) {
+  if (args.flags.verbose) process.stderr.write(`[verbose] ${msg}\n`);
+}
+
 function parseArgs(argv) {
   const opts = { _: [], flags: {} };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === "--json") {
       opts.flags.json = true;
+    } else if (arg === "--legacy-json") {
+      opts.flags.legacyJson = true;
+    } else if (arg === "--json-file") {
+      opts.flags.jsonFile = argv[++i];
+    } else if (arg === "--verbose") {
+      opts.flags.verbose = true;
+    } else if (arg === "--unique") {
+      opts.flags.unique = true;
+    } else if (arg === "--no-unique") {
+      opts.flags.unique = false;
+    } else if (arg === "--all") {
+      opts.flags.all = true;
     } else if (arg === "-n" || arg === "--lines") {
       opts.flags.n = parseInt(argv[++i], 10) || 20;
     } else if (arg === "-p" || arg === "--path") {
@@ -76,6 +102,18 @@ function parseArgs(argv) {
       opts.flags.stoken = argv[++i];
     } else if (arg === "--page") {
       opts.flags.page = parseInt(argv[++i], 10) || 1;
+    } else if (arg === "--page-size") {
+      opts.flags.pageSize = parseInt(argv[++i], 10) || 50;
+    } else if (arg === "--limit") {
+      opts.flags.limit = parseInt(argv[++i], 10) || 50;
+    } else if (arg === "--concurrency") {
+      opts.flags.concurrency = parseInt(argv[++i], 10) || 4;
+    } else if (arg === "--from-uk") {
+      opts.flags.fromUk = argv[++i];
+    } else if (arg === "--msg-id") {
+      opts.flags.msgId = argv[++i];
+    } else if (arg === "--parent-fs-id") {
+      opts.flags.parentFsId = argv[++i];
     } else if (arg.startsWith("-")) {
       opts.flags[arg.replace(/^-+/, "")] = true;
     } else {
@@ -350,29 +388,95 @@ cmds.gshares = async (args, json) => {
 cmds.gls = async (args, json) => {
   const gid = args._[0];
   const fsId = args._[1];
-  if (!gid || !fsId) { console.error("Usage: bdp gls <gid> <fs_id>"); process.exit(1); }
-  const result = await group.listFiles(gid, fsId, { page: args.flags.page || 1 });
-  output(result, json, (d) => {
-    console.log(`${d.files.length} items${d.hasMore ? " (has more — use --page)" : ""}:\n`);
-    d.files.forEach((f) => {
+  if (!gid || !fsId) { console.error("Usage: bdp gls <gid> <fs_id> [--page N] [--page-size N]"); process.exit(1); }
+
+  const opts = {
+    page: args.flags.page || 1,
+    pageSize: args.flags.pageSize || 50,
+  };
+  if (args.flags.fromUk) opts.fromUk = args.flags.fromUk;
+  if (args.flags.msgId) opts.msgId = args.flags.msgId;
+  if (args.flags.parentFsId) opts.parentFsId = args.flags.parentFsId;
+
+  verboseLog(args, `gls gid=${gid} fsId=${fsId} page=${opts.page} pageSize=${opts.pageSize}`);
+  const result = await group.listFiles(gid, fsId, opts);
+
+  if (args.flags.legacyJson) {
+    emitJson(result.files, args);
+    return;
+  }
+
+  if (result.fallback) {
+    verboseLog(args, `fallback: ${result.fallback.reason} -> ${result.fallback.resolvedFsId} (${result.fallback.level})`);
+  }
+
+  if (args.flags.jsonFile || json) {
+    emitJson(result, args);
+  } else {
+    if (result.fallback) {
+      console.log(`⚠️  fallback: ${result.fallback.reason} — 已回退到 ${result.fallback.resolvedFsId} (${result.fallback.level})`);
+    }
+    console.log(`${result.files.length} items${result.hasMore ? " (has more — use --page)" : ""}:\n`);
+    result.files.forEach((f) => {
       const dir = f.isDir ? "[DIR] " : "      ";
       console.log(`  ${dir}${f.name}  ${formatSize(f.size)}  fs_id:${f.fsId}`);
     });
-  });
+  }
 };
 
 cmds.gsearch = async (args, json) => {
   const gid = args._[0];
   const keyword = args._[1];
-  if (!gid || !keyword) { console.error("Usage: bdp gsearch <gid> <keyword>"); process.exit(1); }
-  const results = await group.searchFiles(gid, keyword);
-  output(results, json, (list) => {
-    console.log(`${list.length} matches for "${keyword}":\n`);
-    list.forEach((r) => {
+  if (!gid || !keyword) { console.error("Usage: bdp gsearch <gid> <keyword> [--page N] [--limit N]"); process.exit(1); }
+
+  const opts = {
+    page: args.flags.page || 1,
+    limit: args.flags.limit || 50,
+    concurrency: args.flags.concurrency || 4,
+    unique: args.flags.unique !== false,
+    all: args.flags.all === true,
+  };
+
+  verboseLog(args, `gsearch gid=${gid} keyword="${keyword}" page=${opts.page} limit=${opts.limit} concurrency=${opts.concurrency} unique=${opts.unique} all=${opts.all}`);
+  const result = await group.searchFiles(gid, keyword, opts);
+
+  if (result.partial) {
+    verboseLog(args, `partial: ${result.failedShares}/${result.totalShares} shares failed`);
+  }
+
+  if (args.flags.legacyJson) {
+    emitJson(result.results, args);
+    return;
+  }
+
+  if (args.flags.jsonFile || json) {
+    emitJson(result, args);
+  } else {
+    console.log(`${result.returned} matches for "${keyword}"${result.hasMore ? " (has more — use --page " + (result.nextPage || "?") + ")" : ""}:\n`);
+    result.results.forEach((r) => {
       const dir = r.isDir ? "[DIR] " : "      ";
       console.log(`  ${dir}${r.path || r.name}  ${formatSize(r.size)}  fs_id:${r.fsId}`);
     });
-  });
+    if (result.partial) {
+      console.error(`[verbose] ${result.failedShares} shares failed (partial result)`);
+    }
+  }
+};
+
+cmds.error = async (args, json) => {
+  const code = args._[0] || "-3";
+  const ERRORS = {
+    "-3": "群分享 API 拒绝请求。已观察到大目录、错误的 msgId/fromUk、过期分享都可能触发。\n" +
+          "处理：减小 --page-size（自动重试 50→20→10），或携带 gsearch 返回的 fromUk/msgId/parentFsId 信息重试；\n" +
+          "      若回退到父目录（fallback level=parent），Agent 应从父目录换路径继续遍历。",
+    "-6": "接口鉴权失败。通常为 access_token/cookie 失效，请重新执行 bdp login。",
+  };
+  const msg = ERRORS[code] || `未知错误码 ${code}，请提交 Issue: https://github.com/NkAntony777/baiduwangpan-cli/issues`;
+  if (args.flags.jsonFile || json) {
+    emitJson({ code, description: msg }, args);
+  } else {
+    console.log(msg);
+  }
 };
 
 // ── Main ───────────────────────────────────────────────
@@ -399,7 +503,10 @@ GROUP CHAT OPERATIONS (群聊)
   groups                     List all groups
   gshares <gid>              List share libraries in group
   gls <gid> <fs_id>          Browse files in a share
+                             [--page N] [--page-size N] [--from-uk X] [--msg-id Y] [--parent-fs-id Z]
   gsearch <gid> <keyword>    Search group file names
+                             [--page N] [--limit N] [--concurrency N] [--no-unique] [--all]
+  error <code>               Explain an error code (e.g. -3)
 
 CONFIGURATION
   login                        Browser QR login (auto-detect cookies)
@@ -409,12 +516,20 @@ CONFIGURATION
 
 OPTIONS
   --json                      Output JSON (for Agent consumption)
+  --json-file <path>          Write JSON to file (UTF-8, bypasses console encoding)
+  --legacy-json               Output bare array (gls/gsearch legacy format)
+  --verbose                   Write progress/log to stderr only
   -n <N>                      Number of lines (head/tail)
   -p <path>                   Search path (search)
   -i                          Ignore case (grep)
   -N                          Show line numbers (cat/grep)
   -o <dir>                    Output directory (get)
-  --page <N>                  Page number (gls)
+  --page <N>                  Page number (gls/gsearch)
+  --page-size <N>             Page size for gls (default 50, max 100)
+  --limit <N>                 Page size for gsearch (default 50)
+  --concurrency <N>           Parallel share scans for gsearch (default 4)
+  --no-unique                 Keep duplicates from different msgId (gsearch)
+  --all                       Fetch all results, no paging (gsearch, not Agent default)
 
 EXAMPLES
   bdp login --bduss abc123 --stoken def456
@@ -424,7 +539,10 @@ EXAMPLES
   bdp groups --json
   bdp gshares 539478953581833690
   bdp gls 539478953581833690 742474845517885 --json
-  bdp gsearch 539478953581833690 "倪海厦"`;
+  bdp gls 539478953581833690 292608024165826 --from-uk 2642611875 --msg-id 5069931974377329661 --json
+  bdp gsearch 539478953581833690 "倪海厦" --limit 20 --json
+  bdp gsearch 539478953581833690 "古籍" --page 2 --limit 20 --json-file result.json
+  bdp error -3`;
 
 async function main() {
   const argv = process.argv.slice(2);

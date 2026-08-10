@@ -15,12 +15,12 @@ bdp login
 
 流程完全自动化：
 
-1. 自动启动 Chrome/Edge（使用独立的持久 profile，不影响日常浏览器 profile）
+1. 自动启动 Chrome/Edge（独立临时配置，不影响你正在使用的浏览器）
 2. 自动打开百度网盘登录页
 3. **你用手机百度网盘 App 扫码**（或输入账号密码）
-4. Agent 在原页面会话内验证网页 API，并保存认证方式到 `~/.bdp/config.json`
+4. Agent 自动检测到凭证 → 保存到 `~/.bdp/config.json`
 5. 自动同步登录 BaiduPCS-Go 引擎
-6. 浏览器最小化并继续承载网页/群聊 API；关闭后会按需用同一 profile 重启
+6. 浏览器自动关闭，临时文件自动清理
 
 > 无需按 F12、无需找 cookie、无需复制粘贴。全程只需扫码一步。
 
@@ -65,20 +65,14 @@ bdp whoami
 ```json
 {
   "bduss": "...",
-  "stoken": "...",
-  "webTransport": "browser",
-  "browserProfile": ".../.bdp/browser-profile",
-  "browserPort": 9876
+  "stoken": "..."
 }
 ```
-
-扫码登录时，PCS 文件操作直接使用 BDUSS/STOKEN；`gettemplatevariable` 和 mbox 等网页 API 在专用浏览器会话内执行。手动登录会将 `webTransport` 设为 `curl`，并清理扫码模式留下的完整 Cookie 配置。
 
 ## 凭证安全
 
 - ⚠️ **Agent 禁止**：输出、打印、回显、日志记录配置文件中的 BDUSS/STOKEN 完整值
 - ⚠️ **Agent 禁止**：将凭证提交到 git 仓库或粘贴到对话中
-- `~/.bdp/browser-profile` 含有效登录状态，应与 `config.json` 一样按敏感数据保护
 - 需要确认登录状态时，使用 `bdp whoami --json`（只输出 `***set***` 掩码）
 
 ## 凭证失效处理
@@ -87,10 +81,7 @@ Cookie 过期后（通常数月），运行任意命令会报错或返回空数�
 
 ```bash
 bdp whoami
-# 扫码模式重新登录：
-bdp login
-
-# 或切换为手动凭证模式：
+# 若显示异常，引导用户重新获取 BDUSS/STOKEN 并执行：
 bdp login --bduss <新值> --stoken <新值>
 ```
 

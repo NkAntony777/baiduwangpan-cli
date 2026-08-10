@@ -20,10 +20,14 @@ if ! command -v curl &>/dev/null; then
 fi
 echo "✅ curl 已安装"
 
-# 3. 安装或升级 bdp
-echo "→ 安装/升级 baiduwangpan-cli (全局)..."
-npm install -g baiduwangpan-cli@latest
-echo "✅ bdp 已更新到最新版本"
+# 3. 安装 bdp
+if command -v bdp &>/dev/null; then
+  echo "✅ bdp 已安装"
+else
+  echo "→ 安装 baiduwangpan-cli (全局)..."
+  npm install -g baiduwangpan-cli
+  echo "✅ bdp 安装完成"
+fi
 
 # 3.1 检查 BaiduPCS-Go 引擎
 ENGINE=$(bdp config --json 2>/dev/null | grep -o '"pcsPath": *"[^"]*"' | head -1 | cut -d'"' -f4)
@@ -39,8 +43,8 @@ if bdp whoami --json 2>/dev/null | grep -q '"loggedIn": true'; then
   echo "✅ 已登录百度网盘"
 else
   echo "⚠️  尚未配置凭证。"
-  echo "   请运行: bdp login"
-  echo "   无 Chrome/Edge 时见 reference/authentication.md 使用手动凭证"
+  echo "   请运行: bdp login --bduss <BDUSS值> --stoken <STOKEN值>"
+  echo "   获取方法见 reference/authentication.md"
 fi
 
 echo ""

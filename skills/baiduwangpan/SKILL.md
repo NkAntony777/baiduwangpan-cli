@@ -1,6 +1,18 @@
 ---
 name: baiduwangpan
-description: 使用 baiduwangpan-cli (`bdp`) 操作百度网盘，包括浏览或搜索全盘文件、免下载读取内容、上传下载、文件管理，以及浏览和搜索百度网盘群聊文件。用户要求查看、搜索、读取、上传、下载或管理百度网盘及群聊文件时使用。
+description: 百度网盘 CLI 操作技能 — 基于 baiduwangpan-cli (bdp) 命令，支持全盘文件浏览/搜索/免下载读取内容/上传下载/群聊文件浏览。当用户要求查看、搜索、读取、上传、下载百度网盘文件，或浏览百度网盘群聊文件时使用。
+version: 1.0.0
+authors:
+  - NkAntony777
+credentials:
+  - name: BDP_BDUSS
+    required: false
+    description: "百度网盘 BDUSS cookie。也可通过 `bdp login` 配置保存到 ~/.bdp/config.json"
+    storage: "~/.bdp/config.json 或环境变量"
+  - name: BDP_STOKEN
+    required: false
+    description: "百度网盘 STOKEN cookie。也可通过 `bdp login` 配置保存到 ~/.bdp/config.json"
+    storage: "~/.bdp/config.json 或环境变量"
 ---
 
 ## Overview
@@ -30,7 +42,7 @@ bdp whoami --json
 ```
 
 - `loggedIn: true` → 继续
-- 未登录 → 提示用户运行 `bdp login`；无 Chrome/Edge 时再使用手动凭证（见 reference/authentication.md）
+- 未登录 → 提示用户运行 `bdp login --bduss <值> --stoken <值>`（见 reference/authentication.md）
 
 如果 `bdp` 命令不存在 → 运行安装脚本（见下）。
 
@@ -40,7 +52,7 @@ bdp whoami --json
 ```bash
 bdp login
 ```
-自动启动 Chrome/Edge → 打开登录页 → 用户手机扫码 → 在页面内验证网页 API → 同步引擎。浏览器登录后最小化，并继续承载网页与群聊 API。
+自动启动 Chrome/Edge → 打开登录页 → 用户手机扫码 → Agent 自动检测并保存凭证 → 同步引擎。全程无需 F12。
 
 **备用：手动凭证**
 ```bash
@@ -61,11 +73,11 @@ npm install -g baiduwangpan-cli
 安装时自动下载 BaiduPCS-Go 引擎（含 GitHub 镜像加速）。之后配置凭证：
 
 ```bash
-bdp login
+bdp login --bduss <BDUSS值> --stoken <STOKEN值>
 bdp whoami   # 验证
 ```
 
-> **安全**：BDUSS/STOKEN 是敏感凭证。配置后存放在 `~/.bdp/config.json`。扫码登录的 `~/.bdp/browser-profile` 同样含有效登录状态。Agent 不得打印、输出或回显这些凭证。
+> **安全**：BDUSS/STOKEN 是敏感凭证。配置后存放在 `~/.bdp/config.json`。Agent 不得打印、输出或回显配置文件中凭证的完整内容。
 
 ## 命令速查
 
@@ -90,14 +102,20 @@ bdp rm <path>                      # 删除
 ```bash
 bdp groups                         # 列出所有群组（拿 gid）
 bdp gshares <gid>                  # 列出群内分享库（拿 fs_id）
-bdp gls <gid> <fs_id> [--page N]   # 浏览分享库内容
+bdp gls <gid> <fs_id> [--page N] [--page-size N] [--from-uk X] [--msg-id Y] [--parent-fs-id Z]
+                                   # 浏览分享库内容（默认 page-size 50，最大 100）
 bdp gsearch <gid> <keyword>        # 搜索群文件名
+    [--page N] [--limit N] [--concurrency N] [--no-unique] [--all] [--verbose] [--json-file <path>]
+bdp error -3                       # 查看错误码说明
 ```
 
 ### 通用选项
 
 ```bash
---json   # 结构化 JSON 输出（Agent 首选）
+--json            # 结构化 JSON 输出（Agent 首选）
+--json-file <p>   # JSON 写入文件（UTF-8，绕过控制台编码）
+--legacy-json     # 输出裸数组（旧版兼容）
+--verbose         # 进度/日志只写 stderr，不污染 stdout
 ```
 
 ## 推荐执行模式
@@ -119,12 +137,19 @@ bdp gsearch 539478953581833690 "倪海厦" --json
 **群聊文件浏览工作流**：
 1. `bdp groups --json` → 获取 `gid`
 2. `bdp gshares <gid> --json` → 获取顶层分享目录 `fsId`
-3. `bdp gls <gid> <fsId> --json` → 浏览子目录/文件
+3. `bdp gls <gid> <fsId> --json` → 浏览子目录/文件（默认取 50 条）
 4. `bdp gsearch <gid> <keyword> --json` → 按名称搜索
+
+**分页与遍历规则（Agent 必须遵守）**：
+- gsearch/gls 默认只取 20-50 条；看到 `hasMore: true` 时用 `--page <nextPage>` 继续翻页
+- 每个结果携带 `parentFsId`/`fromUk`/`msgId`，爬取子目录时通过 `gls --from-uk --msg-id --parent-fs-id` 传入
+- 若响应含 `fallback`（level=parent），说明目标目录 API 拒绝（errno=-3），应从 `resolvedFsId`（父目录）换路径继续遍历
+- `partial: true` 表示部分分享扫描失败，结果不完整，可重试或换关键词
+- 大目录搜索可用 `--concurrency 4`（默认）并发扫描；`--all` 会忽略分页获取全部，不要作为默认行为
 
 ## 安全边界
 
-1. **凭证保护**：绝不输出/记录 `~/.bdp/config.json` 中的 BDUSS、STOKEN 值，也不得读取或传输 `~/.bdp/browser-profile`。`bdp config` 输出含前 10 位掩码，同样禁止回显
+1. **凭证保护**：绝不输出/记录 `~/.bdp/config.json` 中的 BDUSS、STOKEN 值。`bdp config` 输出含前 10 位掩码，同样禁止回显
 2. **删除操作**：`bdp rm` 为高风险操作，执行前需用户明确确认
 3. **写入操作**（put/mkdir/rm）：先向用户列出执行计划，确认后再执行
 4. **下载目录**：默认保存到用户指定目录或当前工作目录，不写入系统目录
