@@ -206,7 +206,7 @@ bdp gls 539478953581833690 742474845517885 --page 2 --page-size 50 --json
 ### gsearch — 搜索群文件名
 
 ```
-bdp gsearch <gid> <keyword> [--page <N>] [--limit <N>] [--depth <N>] [--concurrency <N>] [--max-pages <N>] [--max-requests <N>] [--no-unique] [--all] [--no-cache] [--verbose] [--json-file <path>]
+bdp gsearch <gid> <keyword> [--page <N>] [--limit <N>] [--depth <N>] [--concurrency <N>] [--max-pages <N>] [--max-requests <N>] [--no-unique] [--all|--all-results] [--timeout <N>] [--save-partial] [--no-cache] [--verbose] [--json-file <path>]
 ```
 
 - 搜索顶层分享 + 子目录文件名（`--depth N` 递归深度，默认 1）
@@ -216,7 +216,9 @@ bdp gsearch <gid> <keyword> [--page <N>] [--limit <N>] [--depth <N>] [--concurre
 - 默认启用磁盘会话缓存（目录 30min/分享 5min），重复搜索秒回；`--no-cache` 关闭
 - 默认去重（相同 fsId 不同 msgId 只返回一次）；`--no-unique` 保留全部来源
 - `--concurrency 4` 并发扫描分享目录（1-8），稀疏关键词时提前停止
-- `--all` 忽略分页获取全部（不作为默认）
+- `--all`/`--all-results` 忽略分页获取全部（不作为默认，慢但完整）
+- `--timeout <N>`：到点停止扫描并返回已搜到的部分结果（`timedOut:true, complete:false, partial:true`），避免深扫挂死
+- `--save-partial`：未完整（超时/限流/预算/失败）时自动把已搜到的结果存为 JSON 并打印 `💾 部分结果已保存: <路径>`；配 `--json-file <path>` 写该文件，否则自动生成 `bdp-gsearch-<gid>-<kw>-partial-<时间戳>.json`（当前目录）。保存内容含 `saved:"partial"` + `results`（已搜到的全部匹配）+ 扫描诊断（scannedShares/totalShares/failedShares/stoppedReason/timedOut 等），可直接读取续扫
 - `--json-file <path>` 由 Node 直接写 UTF-8 文件，绕过 PowerShell 编码问题
 
 ```bash
@@ -234,13 +236,15 @@ bdp gsearch 539478953581833690 "资料" --limit 50 --json-file result.json
   "page": 1, "pageSize": 50, "returned": 5,
   "total": null, "hasMore": true, "nextPage": 2,
   "unique": true, "complete": false, "partial": false, "throttled": false,
+  "timedOut": false, "stoppedReason": null,
   "scannedShares": 7, "totalShares": 73, "failedShares": 0, "failedDirs": [],
   "throttledShares": 0, "cachedDirs": 0, "budgetUsed": 12, "maxPages": 50
 }
 ```
 
 - `hasMore`/`nextPage`：翻页依据
-- `complete`：是否扫描完所有分享；`partial`：是否有分享失败（结果不完整）；`throttled`：是否因 API 限流中断（重跑命令可续扫，磁盘缓存只补缺失目录）
+- `complete`：是否完整扫描（提前截断/失败/超时都为 false）；`partial`：结果不完整（`!complete`）；`throttled`：是否因 API 限流中断（重跑命令可续扫，磁盘缓存只补缺失目录）
+- `timedOut`：是否因 `--timeout` 到点停止（返回部分结果）；`stoppedReason`：停止原因（`page-limit`/`budget`/`throttled`/`timeout`/`complete`）
 - `failedDirs`：失败目录明细（fsId/name/errno，最多 50 条）
 - `scannedShares`/`totalShares`/`failedShares`/`throttledShares`/`cachedDirs`/`budgetUsed`：扫描进度元数据
 

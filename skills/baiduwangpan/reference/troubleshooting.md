@@ -78,6 +78,8 @@ postinstall 会尝试多个 GitHub 镜像下载 BaiduPCS-Go，若全部失败：
 3. 或者设置环境变量 `BAIDUPCS_CMD` 指向二进制路径
 4. 或者确保 `BaiduPCS-Go` 在系统 PATH 中
 
+> v1.1.1+ 会自动发现包目录内版本子目录（如 `BaiduPCS-Go-v4.0.1-windows-x64/BaiduPCS-Go.exe`）中的二进制；config 里失效的绝对 `pcsPath` 会自动回退到自动发现，无需手改 `~/.bdp/config.json`
+
 ## 其他
 
 遇到未覆盖的问题：

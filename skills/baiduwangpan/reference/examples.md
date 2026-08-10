@@ -86,6 +86,16 @@ bdp gls 539478953581833690 742474845517885 --json   # 浏览目录
 bdp gsearch 539478953581833690 "紫微" --json        # 关键词搜索
 ```
 
+## 场景 9：群聊深度搜索防超时丢结果
+
+用户：**"在群里深搜玄空飞星，超时了也要把已找到的留给我"**
+
+```bash
+bdp gsearch <gid> "玄空飞星" --depth 3 --timeout 85 --save-partial --json-file result.json
+# 超时后：控制台提示 "💾 部分结果已保存: result.json"，文件内含已搜到的 results
+# （结果对象: saved:"partial", partial:true, timedOut:true, stoppedReason:"timeout", scannedShares/totalShares...）
+```
+
 ## 输出解析约定
 
 `--json` 输出结构：

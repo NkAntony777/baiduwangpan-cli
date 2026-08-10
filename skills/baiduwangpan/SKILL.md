@@ -1,7 +1,7 @@
 ---
 name: baiduwangpan
 description: 百度网盘 CLI 操作技能 — 基于 baiduwangpan-cli (bdp) 命令，支持全盘文件浏览/搜索/免下载读取内容/上传下载/群聊文件浏览。当用户要求查看、搜索、读取、上传、下载百度网盘文件，或浏览百度网盘群聊文件时使用。
-version: 1.0.0
+version: 1.1.2
 authors:
   - NkAntony777
 credentials:
@@ -70,7 +70,7 @@ bdp login --bduss <BDUSS值> --stoken <STOKEN值>
 npm install -g baiduwangpan-cli
 ```
 
-安装时自动下载 BaiduPCS-Go 引擎（含 GitHub 镜像加速）。之后配置凭证：
+安装时自动下载 BaiduPCS-Go 引擎（镜像优先加速，国内也能装）。引擎丢失时 CLI 会自动发现包目录内版本子目录（如 `BaiduPCS-Go-v4.0.1-windows-x64/`）中的二进制，config 里失效的绝对 `pcsPath` 自动回退，无需手改配置。之后配置凭证：
 
 ```bash
 bdp login --bduss <BDUSS值> --stoken <STOKEN值>
@@ -106,7 +106,7 @@ bdp gls <gid> <fs_id> [--page N] [--page-size N] [--from-uk X] [--msg-id Y] [--p
                                    # 浏览分享库内容（默认 page-size 50，最大 100）
 bdp gsearch <gid> <keyword>        # 搜索群文件名（全量遍历目录，缓存命中秒回）
     [--page N] [--limit N] [--depth N] [--concurrency N] [--max-pages N] [--max-requests N]
-    [--no-unique] [--all] [--no-cache] [--verbose] [--json-file <path>]
+    [--no-unique] [--all|--all-results] [--timeout N] [--save-partial] [--no-cache] [--verbose] [--json-file <path>]
 bdp cache [clear]                  # 查看/清空会话缓存（~/.bdp/cache/，目录30min/分享5min）
 bdp error <code>                   # 查看错误码说明（如 -3 / 2131）
 ```
@@ -149,7 +149,9 @@ bdp gsearch 539478953581833690 "倪海厦" --json
 - `partial: true` 表示部分分享扫描失败，结果不完整，可重试或换关键词；`throttled: true` 表示 API 限流中断，重跑命令可续扫（磁盘缓存只补缺失目录）
 - 目录内容自动全页遍历（每页上限 100，`--max-pages` 默认 50）；`--max-requests` 控制单命令请求预算（默认 400）
 - gsearch/gtree/gshares 默认启用磁盘会话缓存，重复搜索秒回；`--no-cache` 关闭，`bdp cache clear` 清理
-- 大目录搜索可用 `--concurrency 4`（默认）并发扫描；`--all` 会忽略分页获取全部，不要作为默认行为
+- 大目录搜索可用 `--concurrency 4`（默认）并发扫描；`--all`/`--all-results` 会忽略分页获取全部，不要作为默认行为
+- 深扫建议 `--timeout <秒>`：到点返回已搜到的部分结果（`timedOut:true`，不挂死）；`--save-partial` 在未完整时自动把已搜到的结果存为 JSON 并打印路径（配 `--json-file` 写指定文件，否则自动生成 `bdp-gsearch-<gid>-<kw>-partial-<时间戳>.json`），Agent 超时后直接读该文件续扫
+- gsearch JSON 含 `stoppedReason`（page-limit/budget/throttled/timeout/complete）与 `timedOut`，判断结果是否完整以 `complete`/`partial` 为准
 
 ## 安全边界
 
