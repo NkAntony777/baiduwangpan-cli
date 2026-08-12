@@ -2,7 +2,30 @@
 
 `bdp` 是 `baiduwangpan-cli` 的全局命令。所有命令支持 `--json` 结构化输出。
 
+> **权威用法来源**：本文档是**高级用法与坑位速查**；每个命令的完整 usage/options/examples（结构化 JSON）以运行时为准：
+> ```bash
+> bdp help <命令> --json
+> ```
+> 不确定参数时先查 `bdp help <命令> --json`，不要凭记忆猜测。
+
 ## 网盘文件操作
+
+### help — 帮助（Agent 运行时发现用法）
+
+```
+bdp help [command] [--json]
+```
+
+- `bdp help` — 总览（分组列出全部命令）
+- `bdp help <command>` — 单个命令的完整定义（usage/options/examples/note）
+- `bdp help --json` — 结构化输出全部命令注册项，Agent 零解析成本发现能力
+
+```bash
+bdp help
+bdp help get
+bdp help --json
+bdp help gsearch --json
+```
 
 ### ls — 列出目录
 
@@ -22,16 +45,23 @@ bdp ls /文档 --json
 ### search — 搜索文件名
 
 ```
-bdp search <keyword> [-p <dir>]
+bdp search <keyword> [-p <dir>] [--regex 正则] [--glob 通配符] [--any-word] [--exact]
 ```
 
 - 递归搜索文件名（不支持搜索目录名）
 - `-p` 指定搜索目录，默认 `/` 全盘
+- 模式过滤（客户端二次过滤，引擎搜字面片段再精确匹配）：
+  - `--glob "玄空*.pdf"` — shell 通配符（同时匹配完整路径与文件名）
+  - `--regex "玄空.+pdf$"` — 正则
+  - `--any-word "pdf csv"` — 空格分词，命中任意一个
+  - `--exact "报告.pdf"` — 整名精确相等
 
 ```bash
 bdp search "报告"
 bdp search "数据集" -p /学校
 bdp search "中医" --json
+bdp search "玄空*.pdf" --glob
+bdp search "玄空.+pdf$" --regex
 ```
 
 ### cat — 读取文件内容（免下载）
@@ -98,6 +128,7 @@ bdp peek <path>
 ```
 
 - 显示大小、类型（文本/二进制）、dlink 可用性
+- 含 md5 / server_ctime / local_ctime（web API 可用时）
 - 文本文件自动预览前 10 行
 
 ```bash
@@ -108,23 +139,32 @@ bdp peek /文档/data.json --json
 ### get — 下载文件
 
 ```
-bdp get <path> [-o <dir>]
+bdp get <path> [-o <dir>] [--resume] [--force] [--progress] [--no-verify-size] [--dry-run]
+bdp get <gid>:<fs_id> [-o <dir>]   # 群文件直下（免转存，等价 gdownload 单文件）
 ```
 
 ```bash
 bdp get /文档/file.zip
 bdp get /文档/file.zip -o ./downloads
+bdp get /文档/file.zip --progress   # 实时进度 + 速度
+bdp get /文档/file.zip --json       # JSON 元信息 {size, md5, verified, resumed, avgSpeedBps, ...}
 ```
+
+- **下载可靠性**：直链分块下载（4MB/块），下载后自动 **size 校验**（0 字节 / 大小不符即报错并保留文件供排查）；断点续传（存在部分文件时自动继续，中断后重跑同一命令即可，每块失败自动换新 dlink 重试）
+- **md5**：百度 API 返回的 md5 为混淆键（非内容哈希），CLI 计算本地 md5 供比对，`md5Obfuscated:true` 表示远端不可信
+- 默认保存到当前目录；`-o` 为目录（自动创建）
+- 目录下载/获取 dlink 失败时回退 BaiduPCS-Go 引擎（无校验/续传）
 
 ### put — 上传文件
 
 ```
-bdp put <local> <remote>
+bdp put <local> <remote> [--dry-run]
 ```
 
 ```bash
 bdp put ./report.pdf /文档/
 bdp put ./data.csv /学校/数据/
+bdp put ./x.pdf /文档/ --dry-run   # 模拟
 ```
 
 ### mkdir — 创建目录
@@ -141,21 +181,108 @@ bdp mkdir /文档/2026
 ### rm — 删除文件/目录
 
 ```
-bdp rm <path>
+bdp rm <path> [--dry-run]
 ```
 
 ⚠️ 高危操作，Agent 使用前必须用户确认。
 
 ```bash
 bdp rm /临时文件.txt
+bdp rm /临时文件.txt --dry-run   # 模拟
 ```
 
-## 群聊文件操作
-
-### groups — 列出所有群组
+### mv — 移动/重命名
 
 ```
-bdp groups
+bdp mv <src> <dst>
+```
+
+```bash
+bdp mv /文档/a.pdf /文档/b.pdf   # 重命名
+bdp mv /文档/a.pdf /备份/        # 移动到目录
+```
+
+### cp — 拷贝
+
+```
+bdp cp <src> <dst>
+```
+
+```bash
+bdp cp /文档/a.pdf /备份/
+```
+
+
+### du — 目录容量分析
+
+```
+bdp du [path] [--depth N] [--top N] [--concurrency N]
+```
+
+- 递归统计目录大小（百度无服务端目录大小接口，走 /api/list 并发遍历）
+- 输出每个子目录的聚合大小，找空间大户；深度封顶的子目录标记 [深度封顶]
+- 全盘扫描较慢（API 限制），建议先 `bdp du /` 看顶层，再对大户目录深扫
+
+```bash
+bdp du /                          # 顶层分布
+bdp du /玄学 --depth 5 --top 20   # 深扫指定目录
+bdp du / --json                   # JSON 输出
+```
+
+### recycle — 回收站管理
+
+```
+bdp recycle list [--page N]
+bdp recycle restore <fs_id>...
+bdp recycle clean
+```
+
+- 删除的文件先进回收站（保留 60 天，仍占容量）—— 容量不足时先看这里
+- `clean` 清空回收站释放容量，不可恢复，使用前务必确认
+
+```bash
+bdp recycle list
+bdp recycle restore 378804494923604
+bdp recycle clean
+```
+
+### quota — 网盘配额
+
+
+```
+bdp quota
+```
+
+- 输出总空间/已用/剩余（字节 + 百分比）
+
+### offline — 离线下载
+
+```
+bdp offline add <http_url> [--path /保存目录]
+bdp offline list
+```
+
+- 百度服务器代下，不占本地带宽；`--path` 指定保存目录（缺省引擎默认位置）
+
+### share — 分享管理
+
+```
+bdp share set <path> [--pwd 提取码] [--combined]
+bdp share cancel <shareId> [shareId2 ...]
+bdp share list
+```
+
+- `--combined` 直接输出带提取码的可复制链接
+- `share list` 受 BaiduPCS-Go v4.0.1 引擎 bug 限制（panic），用 `share cancel` 管理已知分享
+
+## 配置命令
+
+```
+bdp login --bduss <X> --stoken <Y>   # 保存凭证
+bdp whoami                            # 检查登录状态
+bdp config                            # 查看配置
+bdp profile list / use <name> / unset   # 多账号 profile
+bdp --profile <name> <命令>            # 全局参数，命令前/后均可
 ```
 
 返回群组名 + gid。

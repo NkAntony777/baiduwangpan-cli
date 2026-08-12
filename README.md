@@ -31,14 +31,21 @@
 | 能力 | 命令 | 说明 |
 |:-----|:------|:-----|
 | 列目录 | `bdp ls /` | 全盘任意目录 |
-| 搜索文件名 | `bdp search "报告"` | 递归全盘搜索 |
+| 搜索文件名 | `bdp search "报告"` | 递归全盘搜索，支持 glob/正则 |
 | **读取文件内容** | `bdp cat /文档/data.json` | 免下载，限 1MB |
 | **读取前 N 行** | `bdp head -n 50 /文档/log.txt` | 免下载 |
 | **读取后 N 行** | `bdp tail -n 30 /文档/log.txt` | 免下载 |
 | **搜索文件内容** | `bdp grep "关键词" /文档/file.txt` | 免下载 |
-| 预览文件 | `bdp peek /文档/report.pdf` | 类型检测 + 前 10 行 |
-| 下载 | `bdp get /文档/file.zip` | 保存到本地 |
+| 预览文件 | `bdp peek /文档/report.pdf` | 类型检测 + 前 10 行 + md5/ctime |
+| 下载 | `bdp get /文档/file.zip` | 保存到本地，**size 校验 + 断点续传** |
 | 上传 | `bdp put ./file.txt /文档/` | 全盘任意位置 |
+| 移动/重命名 | `bdp mv <src> <dst>` | 移动或重命名 |
+| 拷贝 | `bdp cp <src> <dst>` | 网盘内复制 |
+| 配额 | `bdp quota` | 总容量/已用/剩余 |
+| 容量分析 | `bdp du [path]` | 递归统计目录大小，找空间大户 |
+| 回收站 | `bdp recycle list/restore/clean` | 列出/还原/清空回收站 |
+| 离线下载 | `bdp offline add <url>` | 百度服务器代下 |
+| 分享管理 | `bdp share set/cancel` | 生成/取消分享链接 |
 | **列出群组** | `bdp groups` | 所有群聊 + gid |
 | **群内分享库** | `bdp gshares <gid>` | 顶层分享目录 |
 | **浏览群文件** | `bdp gls <gid> <fs_id>` | 分页 + 递归 |
@@ -125,15 +132,30 @@ bdp gdownload 539478953581833690 954615608563687 -o ./downloads
 ```
 bdp ls [path]                    列出目录
 bdp search <keyword> [-p dir]    搜索文件名
+                                  [--regex 正则] [--glob 通配符] [--any-word] [--exact]
 bdp cat <path>                   读取文件内容 (免下载, 限 1MB)
 bdp head [-n N] <path>           读取前 N 行 (默认 20)
 bdp tail [-n N] <path>           读取后 N 行 (默认 20)
 bdp grep <pattern> <path>        搜索文件内容
-bdp peek <path>                  预览文件信息 + 前 10 行
-bdp get <path> [-o dir]          下载文件
-bdp put <local> <remote>         上传文件
+bdp peek <path>                  预览文件信息 + 前 10 行 (含 md5/ctime)
+bdp get <path> [-o dir]          下载文件 (直链分块, size 校验, 断点续传)
+                                  [--resume] [--force] [--progress] [--no-verify-size] [--dry-run]
+                                  <gid>:<fs_id> 形式自动走群文件直下
+bdp put <local> <remote>         上传文件 [--dry-run]
 bdp mkdir <path>                 创建目录
-bdp rm <path>                    删除文件/目录
+bdp rm <path>                    删除文件/目录 [--dry-run]
+bdp mv <src> <dst>               移动/重命名文件/目录
+bdp cp <src> <dst>               拷贝文件/目录
+bdp quota                        网盘配额 (总/已用/剩余)
+bdp du [path]                   目录容量分析 (递归统计, --depth/--top/--concurrency)
+bdp recycle list / restore <id>... / clean   回收站管理 (clean 不可恢复)
+bdp offline add <url> [--path D] 离线下载 (百度服务器代下)
+bdp offline list                 离线任务列表
+bdp share set <path> [--pwd P]   创建分享链接 [--combined 输出带密码链接]
+bdp share cancel <id>...         取消分享
+bdp share list                   列出分享 (受 BaiduPCS-Go v4.0.1 引擎 bug 限制)
+bdp profile list / use <name>    多账号 profile 管理
+bdp help [command]               帮助总览 / 单命令详情 (--json 结构化输出)
 ```
 
 ### 群聊文件操作
@@ -173,6 +195,17 @@ bdp cache [clear]                查看 / 清空会话缓存 (~/.bdp/cache/)
 -i                               忽略大小写 (grep)
 -N                               显示行号 (cat/grep)
 -o <dir>                         输出目录 (get)
+--resume                         断点续传 (get；存在部分文件时自动续传)
+--force                          覆盖重下 (get；先删除旧文件)
+--progress                       显示实时进度 + 速度 (get，stderr)
+--no-verify-size                 关闭下载后 size 校验 (get；默认开启)
+--regex / --glob                 搜索模式: 正则 / 通配符 (search)
+--any-word                       空格分隔关键词命中任意一个 (search/gsearch)
+--exact                          整名精确匹配 (search/gsearch)
+--pwd <P>                        分享提取码 (share set)
+--combined                       输出带提取码的分享链接 (share set)
+--dry-run                        模拟执行不落盘 (get/put/rm)
+--profile <name>                 切换账号 profile (全局参数，命令前/后均可)
 --page <N>                       页码 (gls/gsearch, 默认 1)
 --page-size <N>                  每页条数 (gls, 默认 50, 最大 100)
 --limit <N>                      每页条数 (gsearch, 默认 50)
@@ -192,9 +225,68 @@ bdp cache [clear]                查看 / 清空会话缓存 (~/.bdp/cache/)
 --no-cache                       禁用会话缓存 (gsearch/gtree/gshares/gls)
 ```
 
+### get 下载可靠性（v1.2.0）
+
+`bdp get` 已从裸跑 BaiduPCS-Go 升级为**直链分块下载 + 三重保障**（实测，2026-08）：
+
+```
+bdp get /文档/大文件.zip                 # 下载到当前目录，自动 size 校验
+bdp get /文档/大文件.zip -o ./dl         # 下载到指定目录 (自动创建)
+bdp get /文档/大文件.zip --resume        # 断点续传（存在部分文件时自动续传，无需该参数）
+bdp get /文档/大文件.zip --force         # 已有文件时覆盖重下
+bdp get /文档/大文件.zip --progress      # 实时进度 + 速度 (stderr)
+bdp get /文档/大文件.zip --json          # JSON 元信息: {path, localPath, size, md5, remoteMd5,
+                                         #   md5Match, md5Obfuscated, dlinkExpiry, verified,
+                                         #   skipped, resumed, avgSpeedBps}
+```
+
+- **size 校验**（默认开启，`--no-verify-size` 可关）：下载后比对远端/本地字节数，0 字节或大小不符即报错并**保留文件供排查**
+- **断点续传**：curl 有界 Range 分块下载（4MB/块，实测部分 CDN 节点只接受 ≤5MB 的有界 Range，无界请求会 403），每块失败自动**换新 dlink 重试**；中断后重跑同一命令即从断点继续
+- **并发分块**：大文件（>32MB）默认 3 路并发分块（`--concurrency 1` 可回串行）。实测百度对非 SVIP 是**账号级限速**，并发无法突破总量限速，但多 CDN 节点并行能提升稳定性（坏节点/单连接抖动不影响整体）
+- **md5 软校验**：百度 `/api/list` 返回的 md5 是**混淆键**（含 `o`/`t` 等非 hex 字符，非内容哈希），无法作为完整性依据；CLI 计算本地 md5 供流水线比对，`md5Obfuscated:true` 标注远端不可信
+- **默认保存位置**：`-o` 指定目录，否则当前目录（与 `gdownload` 一致）
+- 目录下载 / 获取 dlink 失败等边界场景自动回退 BaiduPCS-Go 引擎（无校验/续传）
+
+### 多账号 profile（v1.3.0）
+
+多个百度账号切换，认证字段按 profile 隔离（pcsPath/ua 等配置保持全局）：
+
+```
+bdp --profile svip login --bduss X --stoken Y   # 登录到 svip profile
+bdp profile list                                 # 列出所有 profile
+bdp --profile svip quota                         # 用 svip 账号执行命令
+bdp login --profile 备份 ...                     # --profile 也可放命令后
+bdp profile unset                                # 切回全局账号
+```
+
+- 存储在 `~/.bdp/config.json` 的 `profiles` + `activeProfile` 字段；无 profile 时行为与旧版完全一致
+- `bdp whoami` 会显示当前 profile
+
+### 容量管理（v1.6.0）
+
+网盘容量见底时的排查三件套（百度无服务端目录大小接口，`du` 走 /api/list 并发遍历）：
+
+```
+bdp quota                          # 总/已用/剩余（实测 99.78% 时优先排查下面两项）
+bdp recycle list                   # 回收站：删除的文件保留 60 天仍占容量，先看这里
+bdp recycle restore <fs_id>...     # 还原误删
+bdp recycle clean                  # 清空回收站释放容量（不可恢复，务必确认）
+bdp du /                           # 顶层目录容量分布（找空间大户）
+bdp du /玄学 --depth 5 --top 20    # 深扫指定目录（深度封顶的子目录标 [深度封顶]）
+bdp du / --json                    # JSON 输出（Agent 可解析）
+```
+
+> 注意：`du` 全盘扫描较慢（API 限制，深度 4 全盘约 10 分钟），建议先顶层后深扫；若 quota 已用量与全盘可见内容差距巨大，优先怀疑**百度扩容/福利空间到期**（总量缩水，历史总量需在网页端空间明细核实）。
+
 ## 🤖 Agent 集成示例
 
-所有命令支持 `--json` 输出，适合 AI Agent 直接调用和解析：
+所有命令支持 `--json` 输出，适合 AI Agent 直接调用和解析。**Agent 运行时发现用法**：
+
+```bash
+bdp help --json                # 全部命令的 usage/desc/options/examples（结构化）
+bdp help get --json            # 单个命令的完整定义
+bdp help gsearch --json        # 群搜索的全部选项
+```
 
 ```bash
 # Agent 获取群组列表 (JSON)
@@ -293,24 +385,26 @@ bdp groups                          bdp gshares <gid>
 
 ```
 baiduwangpan-cli/
-├── package.json              # npm 配置 (bin: bdp)
+├── package.json              # npm 配置 (bin: bdp，唯一入口)
 ├── bin/
-│   └── bdp.js                # CLI 入口 (统一命令解析)
+│   └── bdp.js                # CLI 入口 (统一命令解析 + 命令注册表)
 ├── lib/
 │   ├── index.js              # 库导出
-│   ├── config.js             # 配置管理 (~/.bdp/config.json)
+│   ├── config.js             # 配置管理 (~/.bdp/config.json，含多账号 profile)
 │   ├── http.js               # 网页 API 双传输 (curl / browser)
 │   ├── browser-login.js      # 浏览器登录、持久 profile 与 CDP 请求
-│   ├── pan.js                # 网盘操作 (BaiduPCS-Go 桥接)
-│   └── group.js              # 群聊操作 (逆向 mbox API)
+│   ├── pan.js                # 网盘操作 (BaiduPCS-Go 桥接 + 直链分块下载)
+│   ├── group.js              # 群聊操作 (逆向 mbox API)
+│   ├── pcs-extra.js          # 引擎扩展命令 (mv/cp/quota/offline/share)
+│   ├── name-match.js         # 文件名匹配 (glob/正则/AND/OR)
+│   └── console.js            # Windows 控制台编码兜底 (chcp 65001)
 ├── test/                     # Node.js 回归测试
 ├── skills/
 │   └── baiduwangpan/         # Agent Skill 源文件 (SKILL.md + reference + scripts)
-├── baiduwangpan-skill.zip    # Agent Skill 打包 (Releases 附件)
-├── bdp.js                    # 早期独立版 (保留参考)
-├── bdp-group.js              # 早期独立版 (保留参考)
-└── bdp.py                    # Python 版 (备用)
+└── baiduwangpan-skill.zip    # Agent Skill 打包 (Releases 附件)
 ```
+
+> **唯一入口**：`bdp` 命令（`bin/bdp.js`）。历史原型 `bdp.py` / `bdp.js` / `bdp-group.js` 已删除（git 历史可查），避免多入口行为不一致。Agent 不确定命令用法时用 `bdp help <命令> --json` 查询。
 
 ## 🤖 Agent Skill 使用
 
@@ -362,6 +456,8 @@ skills/baiduwangpan/
 - **下载限速**：非 SVIP 用户下载受百度限速策略限制
 - **cat 限制**：为防止误读超大文件，`cat` 默认限制 1MB，可通过 `BDP_MAX_CAT_BYTES` 环境变量调整
 - **群聊文件**：群聊 API 为逆向获取，可能随百度服务端变更而失效
+- **share list**：BaiduPCS-Go v4.0.1 的 `share list` 有引擎 bug（panic），CLI 会提示替代方案；`share set/cancel` 正常
+- **PowerShell 中文乱码**：CLI 启动时自动 `chcp 65001`（仅 TTY 且非 UTF-8 代码页时），中文正常显示；管道/重定向场景无副作用
 - **1.1.0 升级**：若引擎丢失（postinstall 网络失败），CLI 会自动发现 `BaiduPCS-Go-v*` 版本子目录中的二进制；config 里失效的绝对 `pcsPath` 也会自动回退到自动发现，无需手改配置
 
 ## 🤝 致谢

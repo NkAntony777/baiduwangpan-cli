@@ -1,7 +1,7 @@
 ---
 name: baiduwangpan
 description: 百度网盘 CLI 操作技能 — 基于 baiduwangpan-cli (bdp) 命令，支持全盘文件浏览/搜索/免下载读取内容/上传下载/群聊文件浏览。当用户要求查看、搜索、读取、上传、下载百度网盘文件，或浏览百度网盘群聊文件时使用。
-version: 1.1.2
+version: 1.1.3
 authors:
   - NkAntony777
 credentials:
@@ -21,9 +21,10 @@ credentials:
 
 - **全盘浏览**：列出任意目录、按文件名递归搜索
 - **免下载读取**：直接读取文件内容（cat/head/tail/grep），无需下载整个文件
-- **上传下载**：网盘与本地之间传输文件
+- **上传下载**：网盘与本地之间传输文件（size 校验 + 断点续传）
 - **群聊文件**：列出群组、浏览群内分享库、搜索群文件
 - **结构化输出**：所有命令支持 `--json` 输出，便于程序化解析
+- **运行时发现用法**：`bdp help [command] --json` 返回全部命令的 usage/desc/options/examples（结构化）。不确定某命令的用法/参数时先 `bdp help <命令> --json` 查询，不要凭记忆猜测参数
 
 ## Trigger
 
