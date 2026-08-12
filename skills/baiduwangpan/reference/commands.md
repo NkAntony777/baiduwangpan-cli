@@ -249,6 +249,24 @@ bdp gsearch 539478953581833690 "资料" --limit 50 --json-file result.json
 - `failedDirs`：失败目录明细（fsId/name/errno，最多 50 条）
 - `scannedShares`/`totalShares`/`failedShares`/`throttledShares`/`cachedDirs`/`budgetUsed`：扫描进度元数据
 
+### gdownload — 直接下载群文件（免转存）
+
+```
+bdp gdownload <gid> <fs_id> [-o <dir>] [--filename <name>] [--from-uk <uk>] [--msg-id <id>] [--no-cache] [--json]
+```
+
+- **用途**：把群聊文件直接下载到本地，**无需转存**（百度已下线群文件转存，`/mbox/msg/transfer` 非空目录一律 `errno=-10`，新版 UI 也移除了"保存"按钮；本命令走逆向的 `/api/sharedownload` 接口，`sign/timestamp` 留空即可，返回明文 dlink 直接 curl 下载）
+- fs_id 来源：`gls`/`gsearch` 结果的 `fsId`；子目录文件或单文件分享自动解析 fromUk/msgId（gshares 顶层匹配），解析不到时用 `--from-uk`/`--msg-id` 显式传入（与 gls/gsearch 同源）
+- **只支持单文件**：目录 fs_id 会报错并提示先用 gls/gsearch 定位文件
+- 输出：默认当前目录，`-o` 指定目录，`--filename` 指定文件名（默认用网盘文件名）
+- 成功校验：下载字节数与服务端 `size` 一致；dlink 有效期 8h，超时/失败重跑即可
+- **JSON 输出**：`{path, name, size, fsId, fromUk, msgId}`
+
+```bash
+bdp gdownload 539478953581833690 954615608563687 -o ./downloads --from-uk 1101635869133 --msg-id 713945176566573051
+bdp gdownload 19647465335386550 643585853595305 -o ./apks   # 单文件分享自动解析来源
+```
+
 ### cache — 会话缓存管理
 
 ```

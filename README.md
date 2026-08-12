@@ -2,7 +2,7 @@
 
 # baiduwangpan-cli
 
-**百度网盘 CLI — 全盘读写 · 免下载读取 · 群聊文件浏览**
+**百度网盘 CLI — 全盘读写 · 免下载读取 · 群聊文件浏览/下载**
 
 专为 AI Agent 设计的百度网盘命令行工具
 
@@ -21,7 +21,7 @@
 
 - **🗂️ 全盘访问** — 不受 `/apps/` 目录限制，读写网盘任意路径
 - **📄 免下载读取** — 通过 HTTP Range 直接读取文件内容到 stdout，无需下载整个文件
-- **👥 群聊文件浏览** — 逆向 mbox API，列出群组、浏览群内分享库、搜索群文件
+- **👥 群聊文件浏览 + 下载** — 逆向 mbox API，列出群组、浏览群内分享库、搜索群文件，并支持**直接下载群文件到本地**（免转存）
 - **🤖 Agent 友好** — 所有命令支持 `--json` 结构化输出，零解析成本
 - **🔧 双模式** — 既是 CLI 工具，也可作为 Node.js 库 `require()` 使用
 - **🔐 凭证安全** — 配置存储在 `~/.bdp/config.json`，不写入代码或日志
@@ -43,7 +43,7 @@
 | **群内分享库** | `bdp gshares <gid>` | 顶层分享目录 |
 | **浏览群文件** | `bdp gls <gid> <fs_id>` | 分页 + 递归 |
 | **搜索群文件** | `bdp gsearch <gid> "关键词"` | 按文件名搜索（缓存命中秒回） |
-| **下载群文件** | `bdp gdownload <gid> <fs_id>` | 免转存直接下载（逆向 sharedownload API） |
+| **下载群文件** | `bdp gdownload <gid> <fs_id>` | **直接下载到本地，免转存**（逆向 sharedownload API） |
 | 群目录树 | `bdp gtree <gid>` | BFS 构建目录树 |
 | 群缓存管理 | `bdp cache [clear]` | 查看 / 清空会话缓存 |
 
@@ -228,12 +228,13 @@ const results = await group.searchFiles('539478953581833690', '倪海厦');
 │              (统一命令解析 + 路由)                    │
 ├──────────────────┬──────────────────────────────────┤
 │    lib/pan.js    │         lib/group.js             │
-│   全盘文件操作    │        群聊文件浏览               │
+│   全盘文件操作    │   群聊文件浏览 + 下载             │
 ├──────────────────┼──────────────────────────────────┤
 │  BaiduPCS-Go     │  lib/http.js (curl / browser)    │
 │  (BDUSS 认证)    │     mbox API (逆向)              │
 │  locate → dlink  │     /mbox/group/listshare        │
 │  upload/download │     /mbox/msg/shareinfo          │
+│                  │     /api/sharedownload → dlink   │
 ├──────────────────┴──────────────────────────────────┤
 │              百度网盘 CDN / API                      │
 └─────────────────────────────────────────────────────┘
