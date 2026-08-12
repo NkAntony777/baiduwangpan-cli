@@ -73,7 +73,7 @@ test("listFiles refuses to guess fromUk/msgId for non-top-level fsId", async () 
 
   await assert.rejects(
     group.listFiles("gid", "unknown-fsid", {}),
-    /Cannot determine fromUk\/msgId/
+    /无法确定 fsId/
   );
 });
 
@@ -584,4 +584,83 @@ test("gsearch --exact matches exact file name (case-insensitive)", async () => {
   };
   const exactCase = await group.searchFiles("gid", "report.pdf", { exact: true });
   assert.deepEqual(exactCase.results.map((r) => r.name).sort(), ["/Report.pdf", "/report.PDF"]);
+});
+
+// ── 需求 #12 补充：AND/OR/exact 语义回归（含目录内文件、大小写、正则元字符）──
+
+test("gsearch AND multi-word applies to nested directory files too", async () => {
+  mockHttp.webJson = async (url) => {
+    if (url.includes("/mbox/group/listshare")) {
+      return makeApi({ msg_count: 1, msg_list: [{ msg_id: "m1", uk: 1, file_list: [share("dir1", "TOP", { isdir: "1" })] }] });
+    }
+    if (url.includes("/mbox/msg/shareinfo")) {
+      return makeApi([
+        share("1", "玄空飞星入门教程"),
+        share("2", "玄空基础"),
+        share("3", "飞星断事"),
+        share("4", "飞星玄空进阶"),
+      ]);
+    }
+    throw new Error("unexpected url " + url);
+  };
+  const result = await group.searchFiles("gid", "玄空 飞星", {});
+  assert.deepEqual(result.results.map((r) => r.name).sort(), ["玄空飞星入门教程", "飞星玄空进阶"]);
+});
+
+test("gsearch AND multi-word is case-insensitive for latin names", async () => {
+  const names = ["Baidu Netdisk", "baidu netdisk pro", "Baidu Docs", "netdisk only"];
+  const items = names.map((n, i) => share(String(4800 + i), n));
+  mockHttp.webJson = async (url) => {
+    if (url.includes("/mbox/group/listshare")) {
+      return makeApi({ msg_count: 1, msg_list: [{ msg_id: "m1", uk: 1, file_list: items }] });
+    }
+    if (url.includes("/mbox/msg/shareinfo")) return makeApi([]);
+    throw new Error("unexpected url " + url);
+  };
+  const result = await group.searchFiles("gid", "BAIDU netdisk", {});
+  assert.deepEqual(result.results.map((r) => r.name).sort(), ["/Baidu Netdisk", "/baidu netdisk pro"]);
+});
+
+test("gsearch --any-word OR matches latin names case-insensitively", async () => {
+  const names = ["Baidu Report 2026", "PanDownload Guide", "baidu tips", "Other stuff"];
+  const items = names.map((n, i) => share(String(5000 + i), n));
+  mockHttp.webJson = async (url) => {
+    if (url.includes("/mbox/group/listshare")) {
+      return makeApi({ msg_count: 1, msg_list: [{ msg_id: "m1", uk: 1, file_list: items }] });
+    }
+    if (url.includes("/mbox/msg/shareinfo")) return makeApi([]);
+    throw new Error("unexpected url " + url);
+  };
+  const result = await group.searchFiles("gid", "BAIDU tips", { anyWord: true });
+  assert.deepEqual(result.results.map((r) => r.name).sort(), ["/Baidu Report 2026", "/baidu tips"]);
+});
+
+test("gsearch keyword with regex metacharacters is matched literally", async () => {
+  const names = ["第1.5版教程", "第15版教程", "1x5版教程"];
+  const items = names.map((n, i) => share(String(4900 + i), n));
+  mockHttp.webJson = async (url) => {
+    if (url.includes("/mbox/group/listshare")) {
+      return makeApi({ msg_count: 1, msg_list: [{ msg_id: "m1", uk: 1, file_list: items }] });
+    }
+    if (url.includes("/mbox/msg/shareinfo")) return makeApi([]);
+    throw new Error("unexpected url " + url);
+  };
+  // "1.5" 中的 "." 是普通字符（子串包含，不经正则），"第15版" 不含 "1.5"
+  const result = await group.searchFiles("gid", "1.5版", {});
+  assert.deepEqual(result.results.map((r) => r.name), ["/第1.5版教程"]);
+});
+
+test("gsearch --exact treats space inside keyword literally", async () => {
+  const names = ["玄空 飞星", "玄空飞星", "玄空飞星资料"];
+  const items = names.map((n, i) => share(String(5100 + i), n));
+  mockHttp.webJson = async (url) => {
+    if (url.includes("/mbox/group/listshare")) {
+      return makeApi({ msg_count: 1, msg_list: [{ msg_id: "m1", uk: 1, file_list: items }] });
+    }
+    if (url.includes("/mbox/msg/shareinfo")) return makeApi([]);
+    throw new Error("unexpected url " + url);
+  };
+  // exact 模式不按空格分词：整个字符串（含空格）必须与文件名相等
+  const exact = await group.searchFiles("gid", "玄空 飞星", { exact: true });
+  assert.deepEqual(exact.results.map((r) => r.name), ["/玄空 飞星"]);
 });
