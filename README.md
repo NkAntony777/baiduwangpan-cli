@@ -150,10 +150,17 @@ bdp gsearch <gid> <keyword>      搜索群文件名 (全量遍历目录)
                                   [--max-pages N] [--max-requests N] [--no-unique]
                                   [--all|--all-results] [--timeout N] [--save-partial]
                                   [--any-word] [--exact] [--no-cache]
-bdp gdownload <gid> <fs_id>   直接下载群文件到本地 (逆向 /api/sharedownload, 免转存)
+bdp gdownload <gid> <fs_id>...   直接下载群文件到本地 (逆向 /api/sharedownload, 免转存)
+                                  单文件直下；多个 fs_id（同消息）自动 zip 打包下载
                                   [-o dir] [--filename NAME] [--from-uk X] [--msg-id Y] [--no-cache]
 bdp cache [clear]                查看 / 清空会话缓存 (~/.bdp/cache/)
 ```
+
+> **群文件下载限制说明**（实测，2026-08）：
+> - 单文件 ≤ ~20MB：直接下载 ✅
+> - 同消息多文件：zip 打包下载 ✅（总包 ≤ ~100MB）
+> - 大文件（> ~100MB）：网页端受百度限制（单文件加密 / zip 报 `31090 package is too large`），需用官方客户端；转存接口已被百度下线（`errno=-10`）
+> - 详见 `docs/group-download-final-verdict.md`
 
 ### 通用选项
 

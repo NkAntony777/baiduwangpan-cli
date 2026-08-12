@@ -108,11 +108,14 @@ bdp gsearch <gid> <keyword>        # 搜索群文件名（全量遍历目录，�
     [--page N] [--limit N] [--depth N] [--concurrency N] [--max-pages N] [--max-requests N]
     [--no-unique] [--all|--all-results] [--timeout N] [--save-partial]
     [--any-word] [--exact] [--no-cache] [--verbose] [--json-file <path>]
-bdp gdownload <gid> <fs_id>        # 直接下载群文件到本地（免转存）
+bdp gdownload <gid> <fs_id> [fs_id2 ...]   # 直接下载群文件到本地（免转存）
+    # 单 fs_id → 单文件直下；多 fs_id（同一分享消息）→ zip 打包下载
     [-o dir] [--filename NAME] [--from-uk X] [--msg-id Y] [--no-cache]
 bdp cache [clear]                  # 查看/清空会话缓存（~/.bdp/cache/，目录30min/分享5min）
 bdp error <code>                   # 查看错误码说明（如 -3 / 2131）
 ```
+
+**群文件下载限制**（实测）：单文件 ≤ ~20MB 直接下载；同消息多文件 zip 打包（总包 ≤ ~100MB）；大文件网页端受限（单文件加密 / zip 报 31090），转存已被百度下线 → 大文件需官方客户端
 
 ### 通用选项
 
