@@ -593,8 +593,8 @@ cmds.gsearch = async (args, json) => {
 
 cmds.gdownload = async (args, json) => {
   const gid = args._[0];
-  const fsId = args._[1];
-  if (!gid || !fsId) { console.error("Usage: bdp gdownload <gid> <fs_id> [-o dir] [--from-uk X] [--msg-id Y] [--filename NAME]"); process.exit(1); }
+  const fsIds = args._.slice(1);
+  if (!gid || fsIds.length === 0) { console.error("Usage: bdp gdownload <gid> <fs_id> [fs_id2 ...] [-o dir] [--from-uk X] [--msg-id Y] [--filename NAME]"); process.exit(1); }
 
   const opts = {
     cache: args.flags.noCache !== true,
@@ -604,13 +604,17 @@ cmds.gdownload = async (args, json) => {
   if (args.flags.o) opts.outDir = args.flags.o;
   if (args.flags.filename) opts.filename = args.flags.filename;
 
-  verboseLog(args, `gdownload gid=${gid} fsId=${fsId} outDir=${opts.outDir || process.cwd()} filename=${opts.filename || "auto"} fromUk=${opts.fromUk || "auto"} msgId=${opts.msgId || "auto"}`);
-  const result = await group.downloadFile(gid, fsId, opts);
+  verboseLog(args, `gdownload gid=${gid} fsIds=[${fsIds.join(",")}] outDir=${opts.outDir || process.cwd()} filename=${opts.filename || "auto"} fromUk=${opts.fromUk || "auto"} msgId=${opts.msgId || "auto"}`);
+
+  // 单文件 → 直接下载；多 fs_id（同一分享消息）→ zip 打包下载（逆向 type=batch）
+  const result = fsIds.length === 1
+    ? await group.downloadFile(gid, fsIds[0], opts)
+    : await group.downloadFiles(gid, fsIds, opts);
 
   output(
-    { path: result.path, name: result.name, size: result.size, fsId, fromUk: result.fromUk, msgId: result.msgId },
+    { path: result.path, name: result.name, size: result.size, fsId: fsIds.length === 1 ? fsIds[0] : undefined, count: result.count, fromUk: result.fromUk, msgId: result.msgId },
     json,
-    () => console.log(`✅ 已下载 ${result.size} 字节 → ${result.path}`)
+    () => console.log(`✅ 已下载 ${result.size} 字节 → ${result.path}${result.count ? `（${result.count} 个文件 zip 打包）` : ""}`)
   );
 };
 
@@ -691,7 +695,8 @@ GROUP CHAT OPERATIONS (群聊)
                              [--max-pages N] [--max-requests N] [--no-unique]
                              [--all|--all-results] [--timeout N] [--save-partial]
                              [--any-word] [--exact] [--no-cache]
-  gdownload <gid> <fs_id>    Direct download a group file (免转存, 逆向 sharedownload API)
+  gdownload <gid> <fs_id>...  Direct download group files (免转存, 逆向 sharedownload API)
+                             single fs_id → direct file; multiple fs_ids → zip 打包 (type=batch)
                              [--from-uk X] [--msg-id Y] [-o dir] [--filename NAME]
   cache [clear]              Show cache info or clear session cache
   error <code>               Explain an error code (e.g. -3)
@@ -740,6 +745,7 @@ EXAMPLES
   bdp gsearch 539478953581833690 "倪海厦" --limit 20 --json
   bdp gsearch 539478953581833690 "古籍" --page 2 --limit 20 --json-file result.json
   bdp gdownload 539478953581833690 954615608563687 -o ./downloads --from-uk 1101635869133 --msg-id 713945176566573051
+  bdp gdownload 539478953581833690 527948256537856 986718405708023 -o ./zips   # 多文件 zip 打包下载
   bdp error -3`;
 
 async function main() {
