@@ -21,6 +21,7 @@
  *   bdp gshares <gid>              列出群内分享库
  *   bdp gls <gid> <fs_id>          浏览分享库内容
  *   bdp gsearch <gid> <keyword>    搜索群文件
+ *   bdp gdownload <gid> <fs_id>    直接下载群文件到本地（免转存）
  *
  * 配置:
  *   bdp login --bduss X --stoken Y  设置认证
@@ -590,6 +591,29 @@ cmds.gsearch = async (args, json) => {
   }
 };
 
+cmds.gdownload = async (args, json) => {
+  const gid = args._[0];
+  const fsId = args._[1];
+  if (!gid || !fsId) { console.error("Usage: bdp gdownload <gid> <fs_id> [-o dir] [--from-uk X] [--msg-id Y] [--filename NAME]"); process.exit(1); }
+
+  const opts = {
+    cache: args.flags.noCache !== true,
+  };
+  if (args.flags.fromUk) opts.fromUk = args.flags.fromUk;
+  if (args.flags.msgId) opts.msgId = args.flags.msgId;
+  if (args.flags.o) opts.outDir = args.flags.o;
+  if (args.flags.filename) opts.filename = args.flags.filename;
+
+  verboseLog(args, `gdownload gid=${gid} fsId=${fsId} outDir=${opts.outDir || process.cwd()} filename=${opts.filename || "auto"} fromUk=${opts.fromUk || "auto"} msgId=${opts.msgId || "auto"}`);
+  const result = await group.downloadFile(gid, fsId, opts);
+
+  output(
+    { path: result.path, name: result.name, size: result.size, fsId, fromUk: result.fromUk, msgId: result.msgId },
+    json,
+    () => console.log(`✅ 已下载 ${result.size} 字节 → ${result.path}`)
+  );
+};
+
 cmds.cache = async (args, json) => {
   const action = args._[0] || "info";
   const { clearGroupCache } = group;
@@ -667,6 +691,8 @@ GROUP CHAT OPERATIONS (群聊)
                              [--max-pages N] [--max-requests N] [--no-unique]
                              [--all|--all-results] [--timeout N] [--save-partial]
                              [--any-word] [--exact] [--no-cache]
+  gdownload <gid> <fs_id>    Direct download a group file (免转存, 逆向 sharedownload API)
+                             [--from-uk X] [--msg-id Y] [-o dir] [--filename NAME]
   cache [clear]              Show cache info or clear session cache
   error <code>               Explain an error code (e.g. -3)
 
@@ -713,6 +739,7 @@ EXAMPLES
   bdp gls 539478953581833690 292608024165826 --from-uk 2642611875 --msg-id 5069931974377329661 --json
   bdp gsearch 539478953581833690 "倪海厦" --limit 20 --json
   bdp gsearch 539478953581833690 "古籍" --page 2 --limit 20 --json-file result.json
+  bdp gdownload 539478953581833690 954615608563687 -o ./downloads --from-uk 1101635869133 --msg-id 713945176566573051
   bdp error -3`;
 
 async function main() {

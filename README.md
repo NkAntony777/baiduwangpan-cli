@@ -43,6 +43,7 @@
 | **群内分享库** | `bdp gshares <gid>` | 顶层分享目录 |
 | **浏览群文件** | `bdp gls <gid> <fs_id>` | 分页 + 递归 |
 | **搜索群文件** | `bdp gsearch <gid> "关键词"` | 按文件名搜索（缓存命中秒回） |
+| **下载群文件** | `bdp gdownload <gid> <fs_id>` | 免转存直接下载（逆向 sharedownload API） |
 | 群目录树 | `bdp gtree <gid>` | BFS 构建目录树 |
 | 群缓存管理 | `bdp cache [clear]` | 查看 / 清空会话缓存 |
 
@@ -113,7 +114,8 @@ bdp cat /文档/config.json
 bdp groups
 bdp gshares 539478953581833690
 bdp gls 539478953581833690 742474845517885
-bdp gsearch 539478953581833690 "倪海厦"
+# 下载群文件到本地 (免转存)
+bdp gdownload 539478953581833690 954615608563687 -o ./downloads
 ```
 
 ## 📖 完整命令参考
@@ -148,6 +150,8 @@ bdp gsearch <gid> <keyword>      搜索群文件名 (全量遍历目录)
                                   [--max-pages N] [--max-requests N] [--no-unique]
                                   [--all|--all-results] [--timeout N] [--save-partial]
                                   [--any-word] [--exact] [--no-cache]
+bdp gdownload <gid> <fs_id>   直接下载群文件到本地 (逆向 /api/sharedownload, 免转存)
+                                  [-o dir] [--filename NAME] [--from-uk X] [--msg-id Y] [--no-cache]
 bdp cache [clear]                查看 / 清空会话缓存 (~/.bdp/cache/)
 ```
 

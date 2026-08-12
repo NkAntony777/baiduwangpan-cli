@@ -5,7 +5,11 @@
  *   1. /mbox/group/list          → 获取所有群组
  *   2. /mbox/group/listshare     → 获取群内分享库（顶层目录）
  *   3. /mbox/msg/shareinfo       → 递归浏览分享库内容（文件/目录）
- *   4. /mbox/msg/transfer        → 转存群文件到自己网盘
+ *   4. /api/sharedownload        → 直接获取群文件下载直链（sign 留空即可，免转存）
+ *
+ * 注：/mbox/msg/transfer 转存接口参数虽已逆向（from_uk/msg_id/path/ondup/async/type/gid/fs_ids），
+ *     但 2026-08 起百度已拒绝群文件转存（非空目录一律 errno=-10，UI 入口也已移除）。
+ *     请用 bdp gdownload 直接下载群文件。
  *
  * 用法:
  *   node bdp-group.js groups                  列出所有群组

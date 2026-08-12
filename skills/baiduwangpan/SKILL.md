@@ -108,6 +108,8 @@ bdp gsearch <gid> <keyword>        # 搜索群文件名（全量遍历目录，�
     [--page N] [--limit N] [--depth N] [--concurrency N] [--max-pages N] [--max-requests N]
     [--no-unique] [--all|--all-results] [--timeout N] [--save-partial]
     [--any-word] [--exact] [--no-cache] [--verbose] [--json-file <path>]
+bdp gdownload <gid> <fs_id>        # 直接下载群文件到本地（免转存）
+    [-o dir] [--filename NAME] [--from-uk X] [--msg-id Y] [--no-cache]
 bdp cache [clear]                  # 查看/清空会话缓存（~/.bdp/cache/，目录30min/分享5min）
 bdp error <code>                   # 查看错误码说明（如 -3 / 2131）
 ```
@@ -142,6 +144,7 @@ bdp gsearch 539478953581833690 "倪海厦" --json
 2. `bdp gshares <gid> --json` → 获取顶层分享目录 `fsId`
 3. `bdp gls <gid> <fsId> --json` → 浏览子目录/文件（默认取 50 条）
 4. `bdp gsearch <gid> <keyword> --json` → 按名称搜索
+5. `bdp gdownload <gid> <fsId> -o ./下载目录` → 直接下载群文件到本地（免转存；fs_id 来自 gls/gsearch 结果，子文件自动解析来源）
 
 **分页与遍历规则（Agent 必须遵守）**：
 - gsearch/gls 默认只取 20-50 条；看到 `hasMore: true` 时用 `--page <nextPage>` 继续翻页
