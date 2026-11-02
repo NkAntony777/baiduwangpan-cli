@@ -55,3 +55,30 @@ test("detectEngineError: 识别无错误码的失败信号", () => {
   assert.ok(pan.detectEngineError("警告: 遍历错误: CreateFile x: 系统找不到文件\n未检测到上传的文件.\n"));
   assert.ok(pan.detectEngineError("操作失败, 以下文件/目录删除失败:"));
 });
+
+test("编码: Range 截断在多字节字符中间时不产生替换字符", () => {
+  // GBK「中文」= d6 d0 ce c4；截断到 3 字节 = 「中」+半个「文」
+  const full = Buffer.from([0xd6, 0xd0, 0xce, 0xc4]);
+  const cut = full.slice(0, 3);
+  const d = pan.decodeTextWithEncoding(cut);
+  assert.ok(!d.text.includes("\uFFFD"), "不应含替换字符: " + JSON.stringify(d.text));
+  assert.equal(d.text, "中");
+});
+
+test("编码: 完整的 GBK 双字节文本不被裁剪", () => {
+  const full = Buffer.from([0xd6, 0xd0, 0xce, 0xc4]);
+  const d = pan.decodeTextWithEncoding(full);
+  assert.equal(d.text, "中文");
+  assert.equal(d.encoding, "gbk");
+});
+
+test("编码: UTF-8 截断在中文中间时也不产生替换字符", () => {
+  const cut = Buffer.from([0xe4, 0xb8, 0xad]); // 「中」缺第三字节
+  const d = pan.decodeTextWithEncoding(cut);
+  assert.ok(!d.text.includes("\uFFFD"), "不应含替换字符: " + JSON.stringify(d.text));
+});
+
+test("编码: ASCII 与完整 UTF-8 原样返回", () => {
+  assert.equal(pan.decodeTextWithEncoding(Buffer.from("hello", "utf-8")).text, "hello");
+  assert.equal(pan.decodeTextWithEncoding(Buffer.from("中医知识", "utf-8")).text, "中医知识");
+});

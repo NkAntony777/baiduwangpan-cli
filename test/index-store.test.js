@@ -130,11 +130,28 @@ test("索引: needsReindex 依据 md5/size 判定", () => {
   dbPath = tmpDb();
   const h = store.openIndex(dbPath);
   try {
-    store.upsertFile(h, { path: "/a.txt", name: "a.txt", size: 10, md5: "m1", content: "x" });
-    assert.equal(store.needsReindex(h, { path: "/a.txt", size: 10, md5: "m1" }), false);
-    assert.equal(store.needsReindex(h, { path: "/a.txt", size: 11, md5: "m1" }), true);
-    assert.equal(store.needsReindex(h, { path: "/a.txt", size: 10, md5: "m2" }), true);
+    store.upsertFile(h, { path: "/a.txt", name: "a.txt", size: 10, md5: "m1", mtime: 1000, content: "x" });
+    assert.equal(store.needsReindex(h, { path: "/a.txt", size: 10, md5: "m1", mtime: 1000 }), false);
+    assert.equal(store.needsReindex(h, { path: "/a.txt", size: 11, md5: "m1", mtime: 1000 }), true);
+    assert.equal(store.needsReindex(h, { path: "/a.txt", size: 10, md5: "m2", mtime: 1000 }), true);
     assert.equal(store.needsReindex(h, { path: "/new.txt", size: 10, md5: "m1" }), true);
+  } finally {
+    h.close();
+  }
+});
+
+test("索引: md5 缺失时退化为 size+mtime 判定（否则内容变化会被漏掉）", () => {
+  dbPath = tmpDb();
+  const h = store.openIndex(dbPath);
+  try {
+    // 百度未返回 md5 的文件：空字符串
+    store.upsertFile(h, { path: "/a.txt", name: "a.txt", size: 10, md5: "", mtime: 1000, content: "旧" });
+    // mtime 变了 → 必须重建
+    assert.equal(store.needsReindex(h, { path: "/a.txt", size: 10, md5: "", mtime: 2000 }), true);
+    // size 变了 → 必须重建
+    assert.equal(store.needsReindex(h, { path: "/a.txt", size: 11, md5: "", mtime: 1000 }), true);
+    // 全同 → 无需重建
+    assert.equal(store.needsReindex(h, { path: "/a.txt", size: 10, md5: "", mtime: 1000 }), false);
   } finally {
     h.close();
   }
@@ -152,4 +169,56 @@ test("索引: 目录前缀过滤生效", () => {
   } finally {
     h.close();
   }
+});
+
+// ── schema 迁移 ─────────────────────────────────────────
+test("索引: 旧版外部内容表结构会被自动重建", () => {
+  const { DatabaseSync } = require("node:sqlite");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "bdp-idx-"));
+  const p = path.join(dir, "old.db");
+  const old = new DatabaseSync(p);
+  old.exec(
+    "CREATE TABLE files (id INTEGER PRIMARY KEY AUTOINCREMENT, path TEXT UNIQUE NOT NULL," +
+    " name TEXT, dir TEXT, size INTEGER, mtime INTEGER, md5 TEXT, ext TEXT," +
+    " content TEXT, indexed_at INTEGER, content_len INTEGER)"
+  );
+  old.exec(
+    "CREATE VIRTUAL TABLE fts USING fts5(tokens, content='files', content_rowid='id', tokenize='unicode61')"
+  );
+  old.prepare("INSERT INTO files (id,path,content) VALUES (1,'/a.txt','甘草内容')").run();
+  old.prepare("INSERT INTO fts(rowid,tokens) VALUES (1,'甘草 内容')").run();
+  old.close();
+
+  const h = store.openIndex(p);
+  try {
+    const sql = h.db
+      .prepare("SELECT sql FROM sqlite_master WHERE name = 'fts'")
+      .get().sql;
+    assert.ok(!/content\s*=\s*'files'/i.test(sql), "旧结构应被重建: " + sql);
+    assert.ok(/body/i.test(sql), "新结构应含 body 列: " + sql);
+    // 重建后仍可检索，且 snippet 不再报 column index out of range
+    const hits = store.search(h, "甘草", { limit: 5 });
+    assert.equal(hits.length, 1);
+    assert.equal(hits[0].path, "/a.txt");
+    assert.ok(hits[0].snippet);
+  } finally {
+    h.close();
+  }
+});
+
+test("索引: checkSchema 判定新旧结构", () => {
+  const { DatabaseSync } = require("node:sqlite");
+  const db = new DatabaseSync(":memory:");
+  db.exec(
+    "CREATE TABLE files (id INTEGER PRIMARY KEY, path TEXT, content TEXT)"
+  );
+  db.exec(
+    "CREATE VIRTUAL TABLE fts USING fts5(tokens, body, tokenize='unicode61')"
+  );
+  assert.equal(store.checkSchema(db).ok, true);
+  db.exec("DROP TABLE fts");
+  db.exec(
+    "CREATE VIRTUAL TABLE fts USING fts5(tokens, content='files', content_rowid='id')"
+  );
+  assert.equal(store.checkSchema(db).ok, false);
 });

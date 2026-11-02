@@ -70,6 +70,31 @@
 - `bdp index` 首次全量构建较慢（需逐文件抽取正文），
   建议先用 `--include` 限定目录。
 
+### 🔧 评审后修复（自查 + 后续评审）
+
+- **`sizeOnlyWastedBytes` 字段名拼错** — `bin/bdp.js` 里写成 `sizeOnlyWastedBytesBytes`，
+  导致 JSON 输出该字段恒为 `undefined`（数字明细缺失）。
+- **flag 默认值互相污染** — `parseArgs` 给 `--top`/`--depth`/`--concurrency`/`--limit`/`-n`
+  硬编码了默认值（15/2/4/50/20），导致 `bdp dedup` 的 `--top` 实际永远是 15
+  （文档写 20）、`bdp preview` 的 `--lines` 实际永远是 20（期望 40）。
+  改为 `parseArgs` 只记录「用户是否显式给了」，默认值交由各命令自己决定。
+- **zip bomb 无防护** — `inflateMember` 用 `zlib.inflateRawSync` 无解压上限，
+  实测 1MB 压缩包可解压出 1GB（1.4 秒）。现在用 `maxOutputLength` 限制为 64MB，
+  超限抛明确错误。
+- **超大 PDF 直接 OOM** — `previewPdf` 把整个文件读进内存（用户网盘有 12GB 的 PDF），
+  现限制为 64MB，超限提示改用 `bdp get` 本地处理。
+- **索引库 schema 升级不兼容** — v1.8.0 早期版本把 FTS 从「外部内容表」改成
+  「独立表 + body 列」（因为外部内容表下 `snippet()` 报 SQL logic error），
+  但 `CREATE VIRTUAL TABLE IF NOT EXISTS` 不会改写已存在的表结构 ——
+  旧库上 `snippet(fts, 1)` 会报 column index out of range。
+  现在启动时检测 schema 并自动重建 FTS 表（files 表保留正文，可无损回填）。
+- **增量索引漏更新** — `needsReindex` 在 md5 缺失（百度未返回）且 size 未变时
+  永远返回 false，文件内容变了索引也不更新。现退化为比较 mtime。
+- **`bdp dedup` 的 keep 策略增强** — `--keep` 现在也接受**显式路径**
+  （`--keep /canonical/path`），该簇保留这份；路径不在簇内则回退 shortest。
+- **md5 缺失透明化** — 新增 `noMd5` 计数，百度未返回 md5 的文件会被明确提示
+  （这些文件只能按 size 粗筛，无法参与精算）。
+
 ### 🔧 MCP
 
 - 新增 3 个工具（共 13 个）：`bdp_preview` / `bdp_dedup` / `bdp_ask`。

@@ -118,3 +118,31 @@ test("pdf: parseToUnicodeCMap 解析 bfrange 数组形式", () => {
 test("pdf: hexToUnicode 按 UTF-16BE 解码", () => {
   assert.equal(pdf.hexToUnicode("4E2D6587"), "中文");
 });
+
+// ── 安全限额 ────────────────────────────────────────────
+test("zip: zip bomb 被拦截（解压超过上限时抛错而非 OOM）", () => {
+  const big = Buffer.alloc(8 * 1024 * 1024, 0x41); // 8MB
+  const comp = zlib.deflateRawSync(big);
+  assert.throws(
+    () => zip.inflateMember(comp, 8, { maxBytes: 1024 }),
+    /超过上限|zip bomb/
+  );
+});
+
+test("zip: 正常大小的成员不受上限影响", () => {
+  const data = Buffer.from("hello world", "utf-8");
+  const comp = zlib.deflateRawSync(data);
+  const out = zip.inflateMember(comp, 8, { maxBytes: 1024 });
+  assert.equal(out.toString("utf-8"), "hello world");
+});
+
+test("zip: store 方式同样受上限约束", () => {
+  assert.throws(
+    () => zip.inflateMember(Buffer.alloc(4096), 0, { maxBytes: 1024 }),
+    /超过上限|zip bomb/
+  );
+});
+
+test("zip: 不支持的压缩方式给出明确错误", () => {
+  assert.throws(() => zip.inflateMember(Buffer.alloc(10), 99), /不支持的压缩方式/);
+});

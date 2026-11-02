@@ -117,7 +117,7 @@ function parseArgs(argv) {
     } else if (arg === "--exact") {
       opts.flags.exact = true;
     } else if (arg === "-n" || arg === "--lines") {
-      opts.flags.n = parseInt(argv[++i], 10) || 20;
+      opts.flags.n = parseInt(argv[++i], 10);
     } else if (arg === "-p" || arg === "--path") {
       opts.flags.p = argv[++i];
     } else if (arg === "-k" || arg === "--keyword") {
@@ -137,9 +137,9 @@ function parseArgs(argv) {
     } else if (arg === "--page-size") {
       opts.flags.pageSize = parseInt(argv[++i], 10) || 50;
     } else if (arg === "--top") {
-      opts.flags.top = parseInt(argv[++i], 10) || 15;
+      opts.flags.top = parseInt(argv[++i], 10);
     } else if (arg === "--limit") {
-      opts.flags.limit = parseInt(argv[++i], 10) || 50;
+      opts.flags.limit = parseInt(argv[++i], 10);
     } else if (arg === "--remove-duplicates") {
       opts.flags.removeDuplicates = true;
     } else if (arg === "--keep") {
@@ -163,9 +163,9 @@ function parseArgs(argv) {
     } else if (arg === "--fields") {
       opts.flags.fields = String(argv[++i] || "").split(",").map((x) => x.trim()).filter(Boolean);
     } else if (arg === "--concurrency") {
-      opts.flags.concurrency = parseInt(argv[++i], 10) || 4;
+      opts.flags.concurrency = parseInt(argv[++i], 10);
     } else if (arg === "--depth") {
-      opts.flags.depth = parseInt(argv[++i], 10) || 2;
+      opts.flags.depth = parseInt(argv[++i], 10);
     } else if (arg === "--max-nodes") {
       opts.flags.maxNodes = parseInt(argv[++i], 10) || 2000;
     } else if (arg === "--max-pages") {
@@ -1199,10 +1199,11 @@ cmds.dedup = async (args, json) => {
     failedDirs: result.failedDirs,
     partial: result.partial,
     obfuscatedMd5: result.obfuscatedCount,
+    noMd5: result.noMd5Count,
     clusterCount: clusters.length,
     duplicateFiles: clusters.reduce((s, c) => s + c.files.length - 1, 0),
     wastedBytes: result.wastedBytes,
-    sizeOnlyWastedBytes: result.sizeOnlyWastedBytesBytes,
+    sizeOnlyWastedBytes: result.sizeOnlyWastedBytes,
     clusters: shown.map((c) => ({
       size: c.size,
       md5: c.md5,
@@ -1226,6 +1227,9 @@ cmds.dedup = async (args, json) => {
     '  (' + (result.elapsedMs / 1000).toFixed(1) + 's)');
   if (result.obfuscatedCount) {
     console.log('其中 ' + result.obfuscatedCount + ' 个文件的 md5 需反混淆（已自动处理）');
+  }
+  if (result.noMd5Count) {
+    console.log('⚠️  ' + result.noMd5Count + ' 个文件百度未返回 md5，无法参与精算（仅按大小粗筛）');
   }
   if (!clusters.length) {
     console.log('✅ 未发现重复文件');
@@ -1283,7 +1287,7 @@ cmds.preview = async (args, json) => {
     console.log('');
     console.log('--- 内容 ---');
     const lines = result.text.split('\n');
-    const max = args.flags.n ? parseInt(args.flags.n, 10) : 40;
+    const max = args.flags.n > 0 ? args.flags.n : 40;
     lines.slice(0, max).forEach((l) => console.log(l));
     if (lines.length > max) console.log('... 还有 ' + (lines.length - max) + ' 行');
   }
