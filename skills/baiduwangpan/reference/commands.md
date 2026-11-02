@@ -683,7 +683,7 @@ bdp serve --mcp                       # 启动 MCP 服务器（stdio）
 
 | 键 | 取值 | 说明 |
 |:-----|:-----|:-----|
-| `webTransport` | `curl` \| `native` \| `browser` | Web API 传输模式。`native`（默认）用 Node 内置 fetch，真并发；`curl` 每次 fork curl 进程，同步阻塞 |
+| `webTransport` | `curl` \| `native` \| `browser` | Web API 传输模式。`native`（默认）用 Node 内置 fetch。`curl` 仍会起 curl 进程，但是异步的，不再冻住事件循环 |
 | `maxBytes` | 正整数（1024 ~ 67108864） | 单次读取的最大字节数 |
 | `ua` | 字符串（不含控制字符） | User-Agent（百度 dlink 对 UA 敏感） |
 | `pcsPath` | 路径（文件名须以 `BaiduPCS-Go` 开头） | BaiduPCS-Go 引擎路径（失效时自动回退到自动发现） |
@@ -751,7 +751,7 @@ bdp gsearch <gid> <keyword> [--page N] [--limit N] [--depth N] [--concurrency N]
     [--any-word] [--exact] [--no-unique] [--no-cache]
 ```
 
-- 按文件名搜索，不下载。落到本地用 `gdownload`（这一步始终是同步 curl，见上文）
+- 按文件名搜索，不下载。落到本地用 `gdownload`（异步 curl，不再冻住事件循环）
 - 默认多个关键词都要命中；`--any-word` 改为命中任意一个
 - `--depth` 默认 1，`--limit` 默认 50，`--concurrency` 默认 4，`--max-pages` 默认 50，`--max-requests` 默认 400
 - `--timeout` 默认 0（不限时）；到点返回已经扫到的部分结果

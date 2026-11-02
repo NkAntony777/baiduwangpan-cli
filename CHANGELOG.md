@@ -42,11 +42,11 @@
   `lib/doctor.js`、`lib/rename.js` 根本不在扫描范围，「只要新开一个文件就能绕过全部保证」。
   白名单每条都写明理由（chcp / command -v / taskkill），且白名单文件里用 `spawnSync` 起**引擎**
   仍然算违规。已用探针文件实测：新文件里的 `spawnSync(cfg.pcsPath)` 现在会被抓出来。
-- 测试总数 420 → **433**。
+- 测试总数 420 → **434**。
 
 ### 📦 分发
 
-- 重新构建 `baiduwangpan-skill.zip`（40,767 字节 / 8 个文件）。
+- 重新构建 `baiduwangpan-skill.zip`（40,759 字节 / 8 个文件）。
 - **npm 上仍为 1.10.2**。v1.11.x 都还没发，首次发布将带上这一版。
 
 ---

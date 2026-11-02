@@ -945,7 +945,7 @@ cmds.get = async (args, json) => {
       return;
     }
     const info = await group.downloadFile(gmatch[1], gmatch[2], opts);
-    if (json || args.flags.jsonFile) emitJson({ path: filePath, groupDownload: true, name: info.name, size: info.size, localPath: info.path, fromUk: info.fromUk, msgId: info.msgId }, args);
+    if (json || args.flags.jsonFile) emitJson({ path: filePath, groupDownload: true, name: info.name, size: info.size, localPath: redactLocalPaths(info.path), fromUk: info.fromUk, msgId: info.msgId }, args);
     else console.log(`✅ 群文件已下载 ${info.size} 字节 → ${info.path}`);
     return;
   }
@@ -1528,7 +1528,7 @@ cmds.gdownload = async (args, json) => {
     : await group.downloadFiles(gid, fsIds, opts);
 
   output(
-    { path: result.path, name: result.name, size: result.size, fsId: fsIds.length === 1 ? fsIds[0] : undefined, count: result.count, fromUk: result.fromUk, msgId: result.msgId },
+    { path: redactLocalPaths(result.path), name: result.name, size: result.size, fsId: fsIds.length === 1 ? fsIds[0] : undefined, count: result.count, fromUk: result.fromUk, msgId: result.msgId },
     json,
     () => console.log(`✅ 已下载 ${result.size} 字节 → ${result.path}${result.count ? `（${result.count} 个文件 zip 打包）` : ""}`)
   );
