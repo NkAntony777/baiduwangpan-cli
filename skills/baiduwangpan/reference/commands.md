@@ -218,7 +218,7 @@ bdp organize [path] --by type --apply --yes   # 执行（真实移动网盘文�
 v1.9.0 起，每条命令的 `--json` 输出都会**追加**一个 `meta` 字段（只追加，不改任何既有字段）：
 
 ```json
-"meta": { "command": "ls", "version": "1.10.2", "profile": null, "elapsedMs": 42 }
+"meta": { "command": "ls", "version": "1.11.0", "profile": null, "elapsedMs": 42 }
 ```
 
 | 字段 | 含义 |
@@ -256,12 +256,10 @@ bdp --json        # → 报「缺少命令」，退出码 1（--json 下返回 J
 bdp               # → 打印帮助，退出码 0（裸跑惯例）
 ```
 
-**已知遗留（同步引擎路径）**：`cat` / `head` / `tail` / `grep` / `peek` / `get` / `put` / `mkdir` /
-`rm` / `mv` / `cp` / `quota` / `offline` / `share` / `recycle` 这 **15** 条命令的引擎路径**仍是同步的**
-（`ls` / `search` 已改异步）；`preview` 在 web API 失败时也会回退同步引擎。
-它们要么低频、要么是写操作（本就不该并发），迁移列入 v1.11.0。
+**同步引擎路径：已清零**（v1.11.0）—— 此前 15 条命令走同步引擎（`spawnSync` 冻结整个事件循环，
+引擎挂死 = MCP 服务器整体不可用）。现已**全部**改为异步 spawn，写操作不再阻塞事件循环。
 
-> 所有引擎调用点（`lib/pan.js` / `lib/pcs-extra.js` / `lib/preview.js`）现已**全部带 timeout + killSignal** ——
+> 所有引擎调用点（`lib/pan.js` / `lib/pcs-extra.js` / `lib/preview.js`）都带 timeout + killSignal ——
 > 引擎挂死不会冻结整个进程，只会让那一次调用在时限内明确失败（`severity: retryable`）。
 > 时限：读操作 120s、写操作 600s，可用 `BDP_ENGINE_TIMEOUT_MS` / `BDP_ENGINE_TIMEOUT_SLOW_MS` 覆盖。
 
@@ -599,7 +597,7 @@ bdp error --list --json     # 列出全部已知错误码
   "error": "文件或目录不存在",
   "errno": 31066,
   "errorCode": { "code": 31066, "name": "FILE_NOT_FOUND", "severity": "user-error", "retryable": false, "action": "…" },
-  "meta": { "command": "ls", "version": "1.10.2", "profile": null, "elapsedMs": 12 }
+  "meta": { "command": "ls", "version": "1.11.0", "profile": null, "elapsedMs": 12 }
 }
 ```
 

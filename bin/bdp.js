@@ -543,8 +543,8 @@ cmds.organize = async (args, json) => {
       try {
         // 目标目录可能不存在，先创建（pan.mkdir 幂等：已存在不算失败）
         const dstDir = item.to.substring(0, item.to.lastIndexOf('/'));
-        try { pan.mkdir(dstDir); } catch { /* 已存在则忽略 */ }
-        pcsExtra.mv(item.from, item.to);
+        try { await pan.mkdir(dstDir); } catch { /* 已存在则忽略 */ }
+        await pcsExtra.mv(item.from, item.to);
         moved.push(item);
       } catch (e) {
         failed.push({ from: item.from, to: item.to, error: e.message });
@@ -818,7 +818,7 @@ cmds.search = async (args, json) => {
 cmds.cat = async (args, json) => {
   const filePath = args._[0];
   if (!filePath) { console.error("Usage: bdp cat <path>"); process.exit(1); }
-  const text = pan.cat(filePath);
+  const text = await pan.cat(filePath);
   const safe = sanitizeControl(text);
   if (json) {
     console.log(JSON.stringify(withMeta({ path: filePath, content: markUntrusted(safe) }, jsonCtx), null, 2));
@@ -835,7 +835,7 @@ cmds.head = async (args, json) => {
   const filePath = args._[0];
   if (!filePath) { console.error("Usage: bdp head [-n N] <path>"); process.exit(1); }
   const n = args.flags.n || 20;
-  const lines = pan.head(filePath, n).map(sanitizeControl);
+  const lines = (await pan.head(filePath, n)).map(sanitizeControl);
   if (json) {
     console.log(JSON.stringify(withMeta({ path: filePath, lines: n, content: markUntrusted(lines) }, jsonCtx), null, 2));
   } else {
@@ -847,7 +847,7 @@ cmds.tail = async (args, json) => {
   const filePath = args._[0];
   if (!filePath) { console.error("Usage: bdp tail [-n N] <path>"); process.exit(1); }
   const n = args.flags.n || 20;
-  const lines = pan.tail(filePath, n).map(sanitizeControl);
+  const lines = (await pan.tail(filePath, n)).map(sanitizeControl);
   if (json) {
     console.log(JSON.stringify(withMeta({ path: filePath, lines: n, content: markUntrusted(lines) }, jsonCtx), null, 2));
   } else {
@@ -859,7 +859,7 @@ cmds.grep = async (args, json) => {
   const pattern = args._[0];
   const filePath = args._[1];
   if (!pattern || !filePath) { console.error("Usage: bdp grep <pattern> <path>"); process.exit(1); }
-  const matches = pan.grep(pattern, filePath, { ignoreCase: args.flags.i });
+  const matches = await pan.grep(pattern, filePath, { ignoreCase: args.flags.i });
   if (json) {
     console.log(JSON.stringify(withMeta({
       path: filePath,
@@ -960,14 +960,14 @@ cmds.put = async (args, json) => {
     console.log(`[dry-run] 将上传 ${local} → ${remote}`);
     return;
   }
-  const raw = pan.upload(local, remote);
+  const raw = await pan.upload(local, remote);
   output({ local, remote, ok: true, raw }, json, () => console.log(raw));
 };
 
 cmds.mkdir = async (args, json) => {
   const dirPath = args._[0];
   if (!dirPath) { console.error("Usage: bdp mkdir <path>"); process.exit(1); }
-  const r = pan.mkdir(dirPath);
+  const r = await pan.mkdir(dirPath);
   if (json || args.flags.jsonFile) {
     emitJson({ path: r.path, created: r.created, exists: r.exists }, args);
     return;
@@ -1011,7 +1011,7 @@ cmds.rm = async (args, json) => {
       return 1;
     }
   }
-  const results = pan.remove(paths);
+  const results = await pan.remove(paths);
   const failed = results.filter((r) => !r.ok);
   if (json || args.flags.jsonFile) {
     emitJson({
@@ -1031,7 +1031,7 @@ cmds.rm = async (args, json) => {
 // ── Pan 扩展命令（BaiduPCS-Go 引擎封装）───────────────
 
 cmds.quota = async (args, json) => {
-  const q = pcsExtra.quota();
+  const q = await pcsExtra.quota();
   output(q, json, (d) => {
     console.log(`总空间: ${formatSize(d.total)}`);
     console.log(`已用:   ${formatSize(d.used)} (${d.ratio.toFixed(2)}%)`);
@@ -1072,7 +1072,7 @@ cmds.du = async (args, json) => {
 cmds.recycle = async (args, json) => {
   const action = args._[0] || "list";
   if (action === "list") {
-    const r = pcsExtra.recycleList(args.flags.page || 1);
+    const r = await pcsExtra.recycleList(args.flags.page || 1);
     output(r, json, (d) => {
       if (d.count === 0) { console.log("回收站为空"); return; }
       console.log(`${d.count} 项回收站内容:`);
@@ -1085,7 +1085,7 @@ cmds.recycle = async (args, json) => {
     if (ids.length === 0) { console.error("Usage: bdp recycle restore <fs_id>..."); process.exit(1); }
     // 批量还原会复活已删文件，且可能覆盖同名现存文件 → 超过 1 项必须显式确认
     if (ids.length > 1 && !(await requireYes(args, json, "批量还原 " + ids.length + " 项", "还原可能覆盖同名现存文件"))) return 1;
-    const r = pcsExtra.recycleRestore(ids);
+    const r = await pcsExtra.recycleRestore(ids);
     if (json || args.flags.jsonFile) emitJson({ restored: ids, ok: true }, args);
     else console.log(`✅ 已还原 ${ids.length} 项: ${ids.join(", ")}`);
   } else if (action === "clean") {
@@ -1110,7 +1110,7 @@ cmds.recycle = async (args, json) => {
         return 1;
       }
     }
-    const r = pcsExtra.recycleClean();
+    const r = await pcsExtra.recycleClean();
     if (json || args.flags.jsonFile) emitJson({ cleaned: true }, args);
     else console.log("✅ 回收站已清空（不可恢复）");
   } else {
@@ -1124,7 +1124,7 @@ cmds.mv = async (args, json) => {
   const src = args._[0];
   const dst = args._[1];
   if (!src || !dst) { console.error("Usage: bdp mv <src> <dst>"); process.exit(1); }
-  const r = pcsExtra.mv(src, dst);
+  const r = await pcsExtra.mv(src, dst);
   output(r, json, () => console.log(`✅ ${r.op === "rename" ? "已重命名" : "已移动"}: ${src} → ${dst}`));
 };
 
@@ -1132,7 +1132,7 @@ cmds.cp = async (args, json) => {
   const src = args._[0];
   const dst = args._[1];
   if (!src || !dst) { console.error("Usage: bdp cp <src> <dst>"); process.exit(1); }
-  const r = pcsExtra.cp(src, dst);
+  const r = await pcsExtra.cp(src, dst);
   output(r, json, () => console.log(`✅ 已拷贝: ${src} → ${dst}`));
 };
 
@@ -1153,10 +1153,10 @@ cmds.offline = async (args, json) => {
     // 离线下载 = 让百度服务器去取任意 URL 并落进网盘，必须显式确认
     if (!(await requireYes(args, json, "创建离线下载任务", "百度服务器会代为抓取该 URL 并保存到网盘"))) return 1;
     // --path 在 parseArgs 里落到 flags.p（不是 flags.path），写错会静默丢掉保存目录
-    const r = pcsExtra.offlineAdd(safeUrl, args.flags.p || args.flags.path);
+    const r = await pcsExtra.offlineAdd(safeUrl, args.flags.p || args.flags.path);
     output(r, json, () => console.log(`✅ 离线任务已创建: taskId=${r.taskId} (${url})${r.savePath ? ` → ${r.savePath}` : ""}`));
   } else if (action === "list") {
-    const r = pcsExtra.offlineList();
+    const r = await pcsExtra.offlineList();
     output(r, json, (d) => {
       console.log(`${d.count} 个离线任务:`);
       d.tasks.forEach((t) => {
@@ -1176,7 +1176,7 @@ cmds.share = async (args, json) => {
     if (!p) { console.error("Usage: bdp share set <path> [--pwd 提取码] [--combined] [--yes]"); process.exit(1); }
     // 创建公开分享 = 对外暴露数据，必须显式确认
     if (!(await requireYes(args, json, "创建公开分享链接", "分享后任何拿到链接的人都能访问该文件"))) return 1;
-    const r = pcsExtra.shareSet(p, args.flags.pwd, { combined: args.flags.combined });
+    const r = await pcsExtra.shareSet(p, args.flags.pwd, { combined: args.flags.combined });
     output(r, json, () => {
       const link = r.combined ? `${r.link}?pwd=${r.pwd}` : r.link;
       console.log(`✅ 分享创建成功: ${link}${!r.combined && r.pwd ? `  提取码: ${r.pwd}` : ""}  shareId:${r.shareId}`);
@@ -1184,10 +1184,13 @@ cmds.share = async (args, json) => {
   } else if (action === "cancel") {
     const ids = args._.slice(1);
     if (ids.length === 0) { console.error("Usage: bdp share cancel <shareId> [shareId2 ...]"); process.exit(1); }
-    const results = ids.map((id) => {
-      const r = pcsExtra.shareCancel(id);
-      return { shareId: id, ok: r.ok };
-    });
+    // ⚠️ 不能用 ids.map(async …) —— map 不会等待 Promise，await 在非 async 回调里是语法错误。
+    // 用 for…of 顺序执行（取消分享是写操作，本就不该并发）。
+    const results = [];
+    for (const id of ids) {
+      const r = await pcsExtra.shareCancel(id);
+      results.push({ shareId: id, ok: r.ok });
+    }
     if (json || args.flags.jsonFile) emitJson(results, args);
     else results.forEach((r) => console.log(`✅ 已取消分享 ${r.shareId}`));
   } else if (action === "list") {
@@ -1559,7 +1562,7 @@ cmds.dedup = async (args, json) => {
       return 1;
     } else {
       const pan = require('../lib/pan');
-      const results = pan.remove(removable);
+      const results = await pan.remove(removable);
       const failed = results.filter((r) => !r.ok);
       removal = {
         attempted: results.length,

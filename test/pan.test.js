@@ -33,6 +33,7 @@ const realCp = require("child_process");
 let curlResponder = null; // (start, end) => { code, data, size? } 或 { exitCode }
 let curlCalls = [];
 function fakeSpawn(cmd, args, opts) {
+  if (cmd === "BaiduPCS-Go") return fakeEngineSpawn(cmd, args);
   if (cmd !== "curl") return realCp.spawn(cmd, args, opts);
   curlCalls.push(args);
   const child = new EventEmitter();
@@ -74,24 +75,39 @@ function fakeSpawn(cmd, args, opts) {
 }
 
 // BaiduPCS-Go 输出（locate/meta/d）模拟
-function fakeSpawnSync(cmd, args, opts) {
-  if (cmd !== "BaiduPCS-Go") return realCp.spawnSync(cmd, args, opts);
+// v1.11.0：引擎调用改成**异步** spawn（lib/pan.js 的 runPCSResultAsync）——
+// mock 必须是「真进程」形态（EventEmitter + stdout/stderr 流 + close/error 事件）。
+function fakeEngineSpawn(cmd, args) {
   const sub = args[0];
+  let stdout = null;
   if (sub === "locate") {
-    return { stdout: "  0  https://d.example.com/file/abc?size=1000&expires=8h&x=1\n  1  https://d.example.com/backup?size=1000\n", error: null };
+    stdout = "  0  https://d.example.com/file/abc?size=1000&expires=8h&x=1\n  1  https://d.example.com/backup?size=1000\n";
+  } else if (sub === "meta") {
+    stdout =
+      "  类型              文件\n  文件路径          /docs/报告.pdf\n  文件大小          1000, 0.98KB\n" +
+      "  md5 (可能不正确)  abcdef0123456789abcdef0123456789\n";
+  } else if (sub === "d") {
+    stdout = "download via pcs engine\n";
   }
-  if (sub === "meta") {
-    return { stdout: "  类型              文件\n  文件路径          /docs/报告.pdf\n  文件大小          1000, 0.98KB\n  md5 (可能不正确)  abcdef0123456789abcdef0123456789\n", error: null };
-  }
-  if (sub === "d") {
-    return { stdout: "download via pcs engine\n", error: null };
-  }
-  throw new Error("unexpected BaiduPCS-Go args: " + args.join(" "));
+  const child = new EventEmitter();
+  child.stdout = new PassThrough();
+  child.stderr = new PassThrough();
+  child.kill = () => true;
+  setImmediate(() => {
+    if (stdout === null) {
+      child.emit("error", new Error("unexpected BaiduPCS-Go args: " + args.join(" ")));
+      return;
+    }
+    child.stdout.write(stdout);
+    child.stdout.end();
+    child.emit("close", 0);
+  });
+  return child;
 }
 
 const mockCp = {
   spawn: fakeSpawn,
-  spawnSync: fakeSpawnSync,
+  spawnSync: realCp.spawnSync,
 };
 require.cache[cpPath] = { id: cpPath, filename: cpPath, loaded: true, exports: mockCp };
 
@@ -439,8 +455,8 @@ test("du: 深度封顶 → 子目录标记 capped 且不递归", async () => {
   assert.equal(r2.size, 999);
 });
 
-test("getFileMeta: 解析 BaiduPCS-Go v4.0.1 真实输出格式", () => {
-  const meta = pan.getFileMeta("/docs/报告.pdf");
+test("getFileMeta: 解析 BaiduPCS-Go v4.0.1 真实输出格式", async () => {
+  const meta = await pan.getFileMeta("/docs/报告.pdf");
   assert.equal(meta.size, 1000); // "文件大小 1000, 0.98KB" 取精确字节
   assert.equal(meta.md5, "abcdef0123456789abcdef0123456789");
   assert.equal(meta.isDir, false);

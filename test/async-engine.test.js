@@ -49,6 +49,13 @@ let killCalls = 0;
 const BIG_CHUNK = 5 * 1024 * 1024;
 const BIG_CHUNKS = 5;
 
+// 写操作的引擎输出（v1.11.0：写操作也走异步引擎了）
+const CMD_OUTPUT = {
+  mkdir: "创建目录成功: /probe\n",
+  rm: "操作成功, 以下文件/目录已删除, 可在网盘文件回收站找回: /probe\n",
+  u: "上传成功: /probe\n",
+};
+
 function fakeSpawn(cmd, args, opts) {
   if (cmd !== "BaiduPCS-Go") return realCp.spawn(cmd, args, opts);
   spawnCalls++;
@@ -75,7 +82,9 @@ function fakeSpawn(cmd, args, opts) {
       child.emit("close", 0);
       return;
     }
-    child.stdout.write(mockOutput);
+    child.stdout.write(
+      CMD_OUTPUT[args[0]] !== undefined ? CMD_OUTPUT[args[0]] : mockOutput
+    );
     child.stdout.end();
     child.emit("close", 0); // 引擎出错时退出码仍是 0 —— 必须靠文本判定
   }, DELAY_MS);
@@ -185,6 +194,40 @@ test("异步版：引擎错误文本仍被识别为失败（errno 正确）", as
     }
   );
   mockOutput = ENGINE_TABLE;
+});
+
+// ── v1.11.0：写操作也不再冻结事件循环 ──────────────────────────────────
+//
+// 此前写操作（mkdir/rm/put/mv/cp/…）走同步 spawnSync —— 一次调用就把整个 Node 进程
+// 冻住，MCP 服务器整体不可用。v1.11.0 把它们全迁到异步 spawn。
+test("v1.11.0: 写操作走异步引擎 —— 并发期间定时器仍能触发（不再冻结事件循环）", async () => {
+  let ticks = 0;
+  const timer = setInterval(() => {
+    ticks++;
+  }, 10);
+  try {
+    await Promise.all([
+      pan.mkdir("/a"),
+      pan.mkdir("/b"),
+      pan.mkdir("/c"),
+      pan.mkdir("/d"),
+    ]);
+  } finally {
+    clearInterval(timer);
+  }
+  assert.ok(
+    ticks > 0,
+    "并发写操作期间定时器应至少触发一次（同步引擎会一次都触发不了）"
+  );
+});
+
+test("v1.11.0: 写操作的结果与失败语义不变（mkdir 幂等 / rm 逐条汇总）", async () => {
+  const created = await pan.mkdir("/probe");
+  assert.equal(created.created, true);
+  assert.equal(created.exists, false);
+  const removed = await pan.remove(["/probe", "/probe2"]);
+  assert.equal(removed.length, 2);
+  assert.equal(removed[0].ok, true, "删除成功应被确认（引擎输出含「操作成功」）");
 });
 
 // ── T-01：输出超限必须转成**明确错误**，不能返回「空成功」────────────────

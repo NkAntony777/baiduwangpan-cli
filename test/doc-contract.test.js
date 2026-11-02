@@ -173,27 +173,38 @@ function parseSyncEngineList(md) {
 }
 
 /**
- * 源码里走**同步**引擎的调用点总数（新增调用点必须同步改这里并复核清单）。
- * 只数真实调用行：跳过注释行与函数定义。
+ * 源码里走**同步**引擎的调用点总数 —— **v1.11.0 起必须为 0**。
+ *
+ * 判定两件事：
+ *   1. 没有任何地方用 spawnSync 启动 BaiduPCS-Go 引擎进程（它会冻结整个事件循环）
+ *   2. 不存在**同步**的 runPCS / runPCSResult 包装器（async 的不算）
  */
 function countSyncEngineCallSites() {
   const files = ["lib/pan.js", "lib/pcs-extra.js", "lib/preview.js"];
   let n = 0;
   for (const f of files) {
-    for (const line of read(path.join(ROOT, f)).split("\n")) {
-      const t = line.trim();
-      if (!t || t.startsWith("//") || t.startsWith("*") || t.startsWith("/*")) continue;
-      if (/^function runPCS(?:Result)?\(/.test(t)) continue; // 定义本身
-      if (/runPCS(?:Result)?\(/.test(t)) {
-        n++;
-        continue;
-      }
-      // 直接 spawn 引擎（绕过 runPCS 包装）的调用点 —— 目前只有 lib/preview.js 的 locate 回退。
-      // 包装函数内部的 spawnSync(cfg.pcsPath, args, …) 不单独计数（否则同一个调用点会被数两次）。
-      if (/spawnSync\(cfg\.pcsPath/.test(t) && !/spawnSync\(cfg\.pcsPath,\s*args/.test(t)) n++;
-    }
+    const src = read(path.join(ROOT, f));
+    // 同步 spawn 引擎
+    n += (src.match(/spawnSync\(\s*(?:cfg\.)?pcsPath/g) || []).length;
+    // 同步的引擎包装器（async function runPCS( 不算）
+    n += (src.match(/^(?!async )function runPCS(?:Result)?\(/gm) || []).length;
   }
   return n;
+}
+
+/**
+ * 取文档里的「同步引擎路径」说明段（用于断言「已清零」）。
+ */
+function extractSyncSection(md) {
+  const lines = md.split("\n");
+  const idx = lines.findIndex((l) => l.indexOf("同步引擎路径") >= 0);
+  if (idx < 0) return null;
+  const out = [];
+  for (let i = idx; i < lines.length && i < idx + 8; i++) {
+    out.push(lines[i]);
+    if (lines[i].trim() === "") break;
+  }
+  return out.join("\n");
 }
 
 /**
@@ -435,42 +446,33 @@ test("契约 8: bdp error 的 code 取值规则（三种写法命中 + 非登记
 });
 
 // ── 契约 9：D9 同步遗留清单（三处一致 + 与实现对得上）────────────────────
-test("契约 9: 同步遗留清单三处一致，且与实现对得上", () => {
-  const expected = Object.keys(SYNC_COMMAND_SUBCOMMANDS).sort();
-  assert.deepEqual(
-    parseSyncEngineList(read(README_MD)),
-    expected,
-    "README 的同步遗留清单应与实现一致"
-  );
-  assert.deepEqual(
-    parseSyncEngineList(read(SKILL_MD)),
-    expected,
-    "SKILL.md 的同步遗留清单应与实现一致"
-  );
-  assert.deepEqual(
-    parseSyncEngineList(read(COMMANDS_MD)),
-    expected,
-    "commands.md 的同步遗留清单应与实现一致"
-  );
-
-  // 每条命令用到的引擎子命令必须在源码里真实存在（防止文档与实现各说各话）
-  const src = ["lib/pan.js", "lib/pcs-extra.js", "lib/preview.js"]
-    .map((f) => read(path.join(ROOT, f)))
-    .join("\n");
-  for (const [cmd, subs] of Object.entries(SYNC_COMMAND_SUBCOMMANDS)) {
-    for (const sub of subs) {
-      assert.ok(
-        src.indexOf('"' + sub + '"') >= 0,
-        cmd + " 用到的引擎子命令 " + sub + " 在源码里找不到 —— 清单与实现对不上"
-      );
-    }
-  }
-  // 同步调用点总数（新增调用点必须同步改这个数，并复核清单）
+test("契约 9: 同步引擎路径已清零（源码无同步引擎调用 + 文档声明归零）", () => {
+  // 1) 结构性保证：源码里**没有任何**同步引擎调用点
   assert.equal(
     countSyncEngineCallSites(),
-    18,
-    "同步引擎调用点数量变了 —— 清单需要复核"
+    0,
+    "仍有同步引擎调用点 —— 同步路径没有清干净（spawnSync 会冻结整个事件循环）"
   );
+
+  // 2) 文档：三处都必须声明「已清零」，且不得再把任何命令列成同步遗留
+  for (const [label, md] of [
+    ["README.md", read(README_MD)],
+    ["SKILL.md", read(SKILL_MD)],
+    ["commands.md", read(COMMANDS_MD)],
+  ]) {
+    const section = extractSyncSection(md);
+    assert.ok(section, label + " 应有「同步引擎路径」说明段");
+    assert.ok(
+      /已清零|0 条|没有遗留/.test(section),
+      label + " 的同步引擎路径说明应声明已清零，实际:\n" + section
+    );
+    const still = codeSpans(section).filter((x) => Object.prototype.hasOwnProperty.call(SYNC_COMMAND_SUBCOMMANDS, x));
+    assert.deepEqual(
+      still,
+      [],
+      label + " 不应再把任何命令列成「仍走同步引擎路径」: " + still.join(", ")
+    );
+  }
 });
 
 // ── 契约 10：D10 README 与 CHANGELOG 的性能表互校 ───────────────────────

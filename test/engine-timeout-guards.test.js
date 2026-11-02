@@ -36,59 +36,8 @@ test("时限: 非法/非正取值回落到默认值（不得变成 1ms 的病态
   assert.equal(et.normalizeTimeout(" 2000 ", 120000), 2000);
 });
 
-// ── 3：同步版 ENOBUFS 的通道判定 ───────────────────────────────────────
-test("同步引擎: ENOBUFS 按已收回的字节数判定通道（stderr 超限不再误报 stdout）", () => {
-  const cpPath = require.resolve("child_process");
-  const realCp = require("child_process");
-  const MB = 1024 * 1024;
-  let mock = { stdout: "", stderr: "" };
-  function fakeSpawnSync(cmd, args, opts) {
-    if (cmd !== "BaiduPCS-Go") return realCp.spawnSync(cmd, args, opts);
-    return { error: { code: "ENOBUFS" }, stdout: mock.stdout, stderr: mock.stderr, status: null };
-  }
-  require.cache[cpPath] = {
-    id: cpPath,
-    filename: cpPath,
-    loaded: true,
-    exports: Object.assign({}, realCp, { spawnSync: fakeSpawnSync }),
-  };
-  const TMP_CFG = fs.mkdtempSync(path.join(os.tmpdir(), "bdp-enobufs-"));
-  process.env.BDP_CONFIG_DIR = TMP_CFG;
-  fs.writeFileSync(
-    path.join(TMP_CFG, "config.json"),
-    JSON.stringify({ ua: "test-ua", pcsPath: "BaiduPCS-Go" }),
-    "utf-8"
-  );
-  delete require.cache[require.resolve("../lib/pan.js")];
-  const pan = require("../lib/pan.js");
-  try {
-    mock = { stdout: "", stderr: "x".repeat(21 * MB) };
-    let err = null;
-    try {
-      pan.mkdir("/probe");
-    } catch (e) {
-      err = e;
-    }
-    assert.ok(err, "stderr 超限应抛错");
-    assert.ok(/stderr/.test(err.message), "应报告 stderr 通道: " + err.message);
-    assert.ok(/20MB/.test(err.message), "应含「20MB」: " + err.message);
-
-    mock = { stdout: "x".repeat(21 * MB), stderr: "" };
-    err = null;
-    try {
-      pan.mkdir("/probe");
-    } catch (e) {
-      err = e;
-    }
-    assert.ok(err, "stdout 超限应抛错");
-    assert.ok(/stdout/.test(err.message), "应报告 stdout 通道: " + err.message);
-  } finally {
-    delete require.cache[cpPath];
-    delete require.cache[require.resolve("../lib/pan.js")];
-    fs.rmSync(TMP_CFG, { recursive: true, force: true });
-  }
-});
-
+// ── 3：同步版 ENOBUFS 用例已随「同步引擎路径」一起删除（v1.11.0）──
+//    异步路径本来就分别报告 stdout / stderr 通道（见 test/async-engine.test.js 的 T-03）。
 // ── 「只给 --profile 不给命令」不得建号 ────────────────────────────────
 test("CLI: 只给 --profile 不给命令 → 退出 1，且不建出/激活 profile", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "bdp-prof-only-"));

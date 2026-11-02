@@ -1,7 +1,7 @@
 ---
 name: baiduwangpan
 description: 百度网盘 CLI 操作技能 — 基于 baiduwangpan-cli (bdp) 命令，支持全盘文件浏览/搜索/免下载读取内容/上传下载/群聊文件浏览。当用户要求查看、搜索、读取、上传、下载百度网盘文件，或浏览百度网盘群聊文件时使用。
-version: 1.10.2
+version: 1.11.0
 authors:
   - NkAntony777
 credentials:
@@ -369,11 +369,9 @@ bdp organize [path] --by type --apply --yes   # 执行（真实移动网盘文�
     `--profile <name>` / `--json-file <path>` 都可以放在**命令之前**，也可以放在命令之后，
     布尔开关与带值选项**可任意交错**（如 `bdp --json --profile x error -3`）。
     带值选项的取值**不能以 `--` 开头** —— 否则报错退出 1（不再建垃圾 profile / 垃圾文件）。
-13. **已知遗留：部分命令仍是同步引擎路径**：`cat` / `head` / `tail` / `grep` / `peek` / `get` /
-    `put` / `mkdir` / `rm` / `mv` / `cp` / `quota` / `offline` / `share` / `recycle` 这 **15** 条命令的
-    引擎路径**仍是同步的**（`ls` / `search` 已改异步）；`preview` 在 web API 失败时也会回退同步引擎。
-    它们要么低频、要么是写操作（本就不该并发），迁移列入 v1.11.0。
-    —— 但**所有**引擎调用点现已**全部带 timeout + killSignal**：引擎挂死只会让那一次调用在时限内明确失败
+13. **同步引擎路径已清零**（v1.11.0）：此前 15 条命令走同步引擎（`spawnSync` 冻结整个事件循环，
+    引擎挂死 = MCP 服务器整体不可用）。现已**全部**改为异步 spawn —— 写操作不再阻塞事件循环。
+    所有引擎调用点都带 timeout + killSignal：挂死只会让那一次调用在时限内明确失败
     （`severity: retryable`），不会冻结整个 MCP 服务器。
 14. **MCP 并发闸门**：stdio 与 HTTP 两种传输的并发**工具调用**上限都是 **4**
     （`BDP_MCP_MAX_CONCURRENCY` 可调）。口径是**工具调用总数**、不是引擎进程数 ——

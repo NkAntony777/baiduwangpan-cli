@@ -20,18 +20,37 @@ let calls = []; // 记录 BaiduPCS-Go 实参（仅 args[0] 至末尾，不含二
 let spawnError = null; // 模拟二进制缺失（spawnSync error）
 let forcedExit = null; // 模拟非零退出码
 
-function fakeSpawnSync(cmd, args, opts) {
-  if (cmd !== "BaiduPCS-Go") return realCp.spawnSync(cmd, args, opts);
+// v1.11.0：pcs-extra 的引擎调用改走 lib/pan.js 的**异步** runner（spawn）——
+// 因此 mock 必须是「真进程」形态（EventEmitter + stdout/stderr 流 + close 事件）。
+const { EventEmitter } = require("node:events");
+const { PassThrough } = require("node:stream");
+
+function fixtureKey(args) {
+  return args[0] + (["offlinedl", "share", "recycle"].includes(args[0]) && args[1] ? " " + args[1] : "");
+}
+
+function fakeSpawn(cmd, args, opts) {
+  if (cmd !== "BaiduPCS-Go") return realCp.spawn(cmd, args, opts);
   calls.push(args.slice());
-  if (spawnError) return { stdout: "", status: null, error: new Error(spawnError) };
-  const key = args[0] + (["offlinedl", "share", "recycle"].includes(args[0]) && args[1] ? " " + args[1] : "");
-  if (outputs[key] === undefined) throw new Error("unexpected BaiduPCS-Go args: " + args.join(" "));
-  return { stdout: outputs[key], status: forcedExit !== null ? forcedExit : 0, error: null };
+  const child = new EventEmitter();
+  child.stdout = new PassThrough();
+  child.stderr = new PassThrough();
+  child.kill = () => true;
+  const fail = (msg) => setTimeout(() => child.emit("error", new Error(msg)), 0);
+  if (spawnError) return fail(spawnError), child;
+  const key = fixtureKey(args);
+  if (outputs[key] === undefined) return fail("unexpected BaiduPCS-Go args: " + args.join(" ")), child;
+  setTimeout(() => {
+    child.stdout.write(outputs[key]);
+    child.stdout.end();
+    child.emit("close", forcedExit !== null ? forcedExit : 0);
+  }, 0);
+  return child;
 }
 
 const mockCp = {
-  spawn: realCp.spawn,
-  spawnSync: fakeSpawnSync,
+  spawn: fakeSpawn,
+  spawnSync: realCp.spawnSync,
 };
 require.cache[cpPath] = { id: cpPath, filename: cpPath, loaded: true, exports: mockCp };
 
@@ -81,10 +100,10 @@ const SHARE_LIST_FIXTURE =
 
 // ── mv / cp ──
 
-test("mv: 目标不存在 → 重命名语义，参数原样拼接", () => {
+test("mv: 目标不存在 → 重命名语义，参数原样拼接", async () => {
   outputs = { mv: "重命名成功: \n/我的资源/1.mp4 -> /我的资源/3.mp4\n" };
   calls = [];
-  const r = pcsExtra.mv("/我的资源/1.mp4", "/我的资源/3.mp4");
+  const r = await pcsExtra.mv("/我的资源/1.mp4", "/我的资源/3.mp4");
   assert.deepEqual(calls, [["mv", "/我的资源/1.mp4", "/我的资源/3.mp4"]]);
   assert.equal(r.op, "rename");
   assert.equal(r.renamed, true);
@@ -93,23 +112,23 @@ test("mv: 目标不存在 → 重命名语义，参数原样拼接", () => {
   assert.match(r.raw, /重命名成功/);
 });
 
-test("mv: 目标是已存在目录 → 移动语义", () => {
+test("mv: 目标是已存在目录 → 移动语义", async () => {
   outputs = { mv: "操作成功, 以下文件/目录移动成功: \n&[{From:/我的资源/1.mp4 To:/1.mp4}]\n" };
   calls = [];
-  const r = pcsExtra.mv("/我的资源/1.mp4", "/");
+  const r = await pcsExtra.mv("/我的资源/1.mp4", "/");
   assert.equal(r.op, "move");
   assert.equal(r.renamed, false);
 });
 
 test("mv: 输出含错误码 → 抛中文错误", async () => {
   outputs = { mv: "移动文件/目录: 遇到错误, 远端服务器返回错误, 代码: 31061, 消息: 文件不存在\n" };
-  assert.throws(() => pcsExtra.mv("/不存在/1.mp4", "/"), /移动失败: .*代码: 31061/);
+  await assert.rejects(() => pcsExtra.mv("/不存在/1.mp4", "/"), /移动失败: .*代码: 31061/);
 });
 
-test("cp: 参数拼接 + 成功解析", () => {
+test("cp: 参数拼接 + 成功解析", async () => {
   outputs = { cp: "操作成功, 以下文件/目录拷贝成功: \n&[{From:/我的资源/1.mp4 To:/1.mp4}]\n" };
   calls = [];
-  const r = pcsExtra.cp("/我的资源/1.mp4", "/");
+  const r = await pcsExtra.cp("/我的资源/1.mp4", "/");
   assert.deepEqual(calls, [["cp", "/我的资源/1.mp4", "/"]]);
   assert.equal(r.op, "cp");
   assert.equal(r.renamed, false);
@@ -117,15 +136,15 @@ test("cp: 参数拼接 + 成功解析", () => {
 
 test("cp: 目标非目录 → 抛错", async () => {
   outputs = { cp: "目标 /x 不是一个目录, 操作失败\n" };
-  assert.throws(() => pcsExtra.cp("/a", "/x"), /拷贝失败: .*不是一个目录/);
+  await assert.rejects(() => pcsExtra.cp("/a", "/x"), /拷贝失败: .*不是一个目录/);
 });
 
 // ── quota ──
 
-test("quota: 解析真实输出（TB 单位）", () => {
+test("quota: 解析真实输出（TB 单位）", async () => {
   outputs = { quota: QUOTA_REAL };
   calls = [];
-  const q = pcsExtra.quota();
+  const q = await pcsExtra.quota();
   assert.deepEqual(calls, [["quota"]]);
   // 10.004883TB / 9.982749TB → 字节（同 ConvertFileSize 换算）
   assert.equal(q.total, 11000485193038);
@@ -136,9 +155,9 @@ test("quota: 解析真实输出（TB 单位）", () => {
   assert.match(q.raw, /总空间: 10.004883TB/);
 });
 
-test("quota: GB 单位 + 非空用户名", () => {
+test("quota: GB 单位 + 非空用户名", async () => {
   outputs = { quota: "用户名: 测试账号, 总空间: 1024.000000GB, 已用空间: 512.5GB, 比率: 50.048828%\n" };
-  const q = pcsExtra.quota();
+  const q = await pcsExtra.quota();
   assert.equal(q.total, 1099511627776);
   assert.equal(q.used, 550292684800);
   assert.equal(q.free, 1099511627776 - 550292684800);
@@ -148,27 +167,27 @@ test("quota: GB 单位 + 非空用户名", () => {
 
 test("quota: 输出无法解析（如未登录报错）→ 抛错", async () => {
   outputs = { quota: "获取网盘配额: 遇到错误, 远端服务器返回错误, 代码: 1, 消息: 未登录\n" };
-  assert.throws(() => pcsExtra.quota(), /获取网盘配额失败: 无法解析输出/);
+  await assert.rejects(() => pcsExtra.quota(), /获取网盘配额失败: 无法解析输出/);
 });
 
 // ── offlinedl ──
 
-test("offlineAdd: 带保存路径 → -path 参数拼接 + taskId 解析", () => {
+test("offlineAdd: 带保存路径 → -path 参数拼接 + taskId 解析", async () => {
   outputs = {
     "offlinedl add": "[1] 添加离线任务成功, 任务ID(task_id): 8833, 源地址: http://example.com/a.iso, 保存路径: /我的资源\n",
   };
   calls = [];
-  const r = pcsExtra.offlineAdd("http://example.com/a.iso", "/我的资源");
+  const r = await pcsExtra.offlineAdd("http://example.com/a.iso", "/我的资源");
   assert.deepEqual(calls, [["offlinedl", "add", "-path=/我的资源", "http://example.com/a.iso"]]);
   assert.equal(r.taskId, 8833);
   assert.equal(r.url, "http://example.com/a.iso");
   assert.equal(r.savePath, "/我的资源");
 });
 
-test("offlineAdd: 不带保存路径 → 不加 -path（磁力链）", () => {
+test("offlineAdd: 不带保存路径 → 不加 -path（磁力链）", async () => {
   outputs = { "offlinedl add": "[1] 添加离线任务成功, 任务ID(task_id): 8844, 源地址: magnet:?xt=urn:btih:abc, 保存路径: /我的资源\n" };
   calls = [];
-  const r = pcsExtra.offlineAdd("magnet:?xt=urn:btih:abc");
+  const r = await pcsExtra.offlineAdd("magnet:?xt=urn:btih:abc");
   assert.deepEqual(calls, [["offlinedl", "add", "magnet:?xt=urn:btih:abc"]]);
   assert.equal(r.taskId, 8844);
   assert.equal(r.savePath, null);
@@ -178,12 +197,12 @@ test("offlineAdd: 引擎输出错误码（退出码仍为 0）→ 抛错", async
   outputs = {
     "offlinedl add": "[1] 添加离线下载任务: 遇到错误, 远端服务器返回错误, 代码: 31045, 消息: 任务列表已满, 地址: http://example.com/a.iso\n",
   };
-  assert.throws(() => pcsExtra.offlineAdd("http://example.com/a.iso"), /添加离线下载任务失败: .*代码: 31045/);
+  await assert.rejects(() => pcsExtra.offlineAdd("http://example.com/a.iso"), /添加离线下载任务失败: .*代码: 31045/);
 });
 
-test("offlineList: 解析表格 → 结构化任务列表", () => {
+test("offlineList: 解析表格 → 结构化任务列表", async () => {
   outputs = { "offlinedl list": OFFLINE_LIST_FIXTURE };
-  const r = pcsExtra.offlineList();
+  const r = await pcsExtra.offlineList();
   assert.equal(r.count, 2);
   const t0 = r.tasks[0];
   assert.equal(t0.taskId, 12345);
@@ -204,26 +223,26 @@ test("offlineList: 解析表格 → 结构化任务列表", () => {
   assert.equal(t1.statusCode, 1);
 });
 
-test("offlineList: 空列表（仅有表头）→ 返回空数组", () => {
+test("offlineList: 空列表（仅有表头）→ 返回空数组", async () => {
   outputs = {
     "offlinedl list": renderTable(["#", "任务ID", "任务名称", "文件大小", "创建日期", "保存路径", "资源地址", "状态"], [], [2, 8, 12, 12, 22, 12, 28, 12]),
   };
-  const r = pcsExtra.offlineList();
+  const r = await pcsExtra.offlineList();
   assert.equal(r.count, 0);
   assert.deepEqual(r.tasks, []);
 });
 
 test("offlineList: 无表头的错误输出 → 抛错", async () => {
   outputs = { "offlinedl list": "查询离线下载任务列表: 遇到错误, 远端服务器返回错误, 代码: 31045, 消息: 任务列表已满\n" };
-  assert.throws(() => pcsExtra.offlineList(), /查询离线下载任务列表失败: .*代码: 31045/);
+  await assert.rejects(() => pcsExtra.offlineList(), /查询离线下载任务列表失败: .*代码: 31045/);
 });
 
 // ── share ──
 
-test("shareSet: 不带密码（公开分享）", () => {
+test("shareSet: 不带密码（公开分享）", async () => {
   outputs = { "share set": "shareID: 44335566, 链接: https://pan.baidu.com/s/1abcDEFgh, 密码: \n" };
   calls = [];
-  const r = pcsExtra.shareSet("/我的资源/报告.pdf");
+  const r = await pcsExtra.shareSet("/我的资源/报告.pdf");
   assert.deepEqual(calls, [["share", "set", "/我的资源/报告.pdf"]]);
   assert.equal(r.shareId, 44335566);
   assert.equal(r.link, "https://pan.baidu.com/s/1abcDEFgh");
@@ -231,20 +250,20 @@ test("shareSet: 不带密码（公开分享）", () => {
   assert.equal(r.combined, false);
 });
 
-test("shareSet: 带密码 → -p 参数", () => {
+test("shareSet: 带密码 → -p 参数", async () => {
   outputs = { "share set": "shareID: 44335567, 链接: https://pan.baidu.com/s/1xyzABCdf, 密码: 8x4f\n" };
   calls = [];
-  const r = pcsExtra.shareSet("/我的资源/报告.pdf", "8x4f");
+  const r = await pcsExtra.shareSet("/我的资源/报告.pdf", "8x4f");
   assert.deepEqual(calls, [["share", "set", "-p", "8x4f", "/我的资源/报告.pdf"]]);
   assert.equal(r.shareId, 44335567);
   assert.equal(r.pwd, "8x4f");
   assert.equal(r.combined, false);
 });
 
-test("shareSet: -f 合并格式（链接?pwd=密码）", () => {
+test("shareSet: -f 合并格式（链接?pwd=密码）", async () => {
   outputs = { "share set": "shareID: 44335568, 链接: https://pan.baidu.com/s/1qweRTYu?pwd=8x4f\n" };
   calls = [];
-  const r = pcsExtra.shareSet("/我的资源/报告.pdf", "8x4f", { combined: true });
+  const r = await pcsExtra.shareSet("/我的资源/报告.pdf", "8x4f", { combined: true });
   assert.deepEqual(calls, [["share", "set", "-p", "8x4f", "-f", "/我的资源/报告.pdf"]]);
   assert.equal(r.combined, true);
   assert.equal(r.pwd, "8x4f");
@@ -253,13 +272,13 @@ test("shareSet: -f 合并格式（链接?pwd=密码）", () => {
 
 test("shareSet: 创建失败 → 抛错", async () => {
   outputs = { "share set": "创建分享链接失败: 创建分享链接: 遇到错误, 远端服务器返回错误, 代码: 31007, 消息: 分享失败\n" };
-  assert.throws(() => pcsExtra.shareSet("/x"), /创建分享失败: .*代码: 31007/);
+  await assert.rejects(() => pcsExtra.shareSet("/x"), /创建分享失败: .*代码: 31007/);
 });
 
-test("shareCancel: 成功", () => {
+test("shareCancel: 成功", async () => {
   outputs = { "share cancel": "取消分享成功\n" };
   calls = [];
-  const r = pcsExtra.shareCancel(44335566);
+  const r = await pcsExtra.shareCancel(44335566);
   assert.deepEqual(calls, [["share", "cancel", "44335566"]]);
   assert.equal(r.ok, true);
   assert.equal(r.shareId, 44335566);
@@ -267,12 +286,12 @@ test("shareCancel: 成功", () => {
 
 test("shareCancel: 失败 → 抛错", async () => {
   outputs = { "share cancel": "取消分享失败: 取消分享: 遇到错误, 远端服务器返回错误, 代码: 31007, 消息: 分享不存在\n" };
-  assert.throws(() => pcsExtra.shareCancel(999), /取消分享失败: .*代码: 31007/);
+  await assert.rejects(() => pcsExtra.shareCancel(999), /取消分享失败: .*代码: 31007/);
 });
 
-test("shareList: 解析表格（含空密码列）", () => {
+test("shareList: 解析表格（含空密码列）", async () => {
   outputs = { "share list": SHARE_LIST_FIXTURE };
-  const r = pcsExtra.shareList();
+  const r = await pcsExtra.shareList();
   assert.equal(r.count, 2);
   const s0 = r.shares[0];
   assert.equal(s0.shareId, 44335566);
@@ -289,10 +308,10 @@ test("shareList: 解析表格（含空密码列）", () => {
   assert.equal(s1.viewCount, 0);
 });
 
-test("shareList: 第二页 → --page 参数", () => {
+test("shareList: 第二页 → --page 参数", async () => {
   outputs = { "share list": renderTable(["#", "ShareID", "分享链接", "提取密码", "特征目录", "特征路径", "过期时间", "浏览次数"], [], [2, 10, 34, 10, 10, 22, 22, 8]) };
   calls = [];
-  pcsExtra.shareList(2);
+  await pcsExtra.shareList(2);
   assert.deepEqual(calls, [["share", "list", "--page=2"]]);
 });
 
@@ -301,20 +320,20 @@ test("shareList: 第二页 → --page 参数", () => {
 test("runPCS: spawnSync error（二进制缺失）→ 抛错", async () => {
   outputs = { quota: QUOTA_REAL };
   spawnError = "spawn BaiduPCS-Go ENOENT";
-  assert.throws(() => pcsExtra.quota(), /BaiduPCS-Go not found at: BaiduPCS-Go/);
+  await assert.rejects(() => pcsExtra.quota(), /BaiduPCS-Go not found at: BaiduPCS-Go/);
   spawnError = null;
 });
 
 test("runPCS: 非零退出码 → 抛错", async () => {
   outputs = { quota: QUOTA_REAL };
   forcedExit = 7;
-  assert.throws(() => pcsExtra.quota(), /退出码 7/);
+  await assert.rejects(() => pcsExtra.quota(), /退出码 7/);
   forcedExit = null;
 });
 
 // ── 工具函数 ──
 
-test("parseSizeText: 单位换算", () => {
+test("parseSizeText: 单位换算", async () => {
   assert.equal(pcsExtra.parseSizeText("1.234567GB"), 1325606222);
   assert.equal(pcsExtra.parseSizeText("100MB"), 104857600);
   assert.equal(pcsExtra.parseSizeText("0B"), 0);
@@ -330,9 +349,9 @@ const RECYCLE_ROW = `  #       FS ID       文件大小       创建日期      
   0  378804494923604         -  2026-08-12 18:56:01  2026-08-12 18:56:15                         60  /bdp-transfer-probe/bdp-130-smoke/                 
   1  123456789012345   2.5MB  2026-08-01 10:00:00  2026-08-02 11:00:00  abcdef0123456789abcdef0123456789  30  /文档/旧报告.pdf`;
 
-test("recycleList: 解析回收站表格（含/不含 MD5 行）", () => {
+test("recycleList: 解析回收站表格（含/不含 MD5 行）", async () => {
   outputs = { "recycle list": RECYCLE_ROW };
-  const r = pcsExtra.recycleList();
+  const r = await pcsExtra.recycleList();
   assert.equal(r.count, 2);
   assert.equal(r.items[0].fsId, 378804494923604);
   assert.equal(r.items[0].size, null, "无大小的行 size 为 null");
@@ -344,31 +363,31 @@ test("recycleList: 解析回收站表格（含/不含 MD5 行）", () => {
   assert.equal(r.items[1].remainDays, 30);
 });
 
-test("recycleList: 空回收站", () => {
+test("recycleList: 空回收站", async () => {
   outputs = { "recycle list": `  #       FS ID       文件大小       创建日期             修改日期        MD5(截图请打码)  剩余时间                 路径                 
 ` };
-  const r = pcsExtra.recycleList();
+  const r = await pcsExtra.recycleList();
   assert.equal(r.count, 0);
 });
 
-test("recycleList: --page 透传", () => {
+test("recycleList: --page 透传", async () => {
   outputs = { "recycle list": RECYCLE_ROW };
-  pcsExtra.recycleList(2);
+  await pcsExtra.recycleList(2);
   assert.ok(calls.some((c) => c[0] === "recycle" && c[1] === "list" && c[2] === "--page=2"), "page=2 应透传: " + JSON.stringify(calls));
 });
 
-test("recycleRestore: 成功/失败", () => {
+test("recycleRestore: 成功/失败", async () => {
   outputs = { "recycle restore": "还原成功: 1 个文件/目录" };
-  const r = pcsExtra.recycleRestore([378804494923604]);
+  const r = await pcsExtra.recycleRestore([378804494923604]);
   assert.equal(r.ok, true);
   assert.equal(r.fsIds[0], 378804494923604);
   outputs = { "recycle restore": "还原失败: 未找到文件" };
-  assert.throws(() => pcsExtra.recycleRestore([1]), /还原失败/);
+  await assert.rejects(() => pcsExtra.recycleRestore([1]), /还原失败/);
 });
 
-test("recycleClean: 清空成功", () => {
+test("recycleClean: 清空成功", async () => {
   outputs = { "recycle delete": "清空回收站成功" };
-  const r = pcsExtra.recycleClean();
+  const r = await pcsExtra.recycleClean();
   assert.equal(r.ok, true);
   assert.ok(calls.some((c) => c[1] === "delete" && c[2] === "-all"), "delete -all 应透传");
 });
