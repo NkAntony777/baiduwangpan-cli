@@ -98,8 +98,11 @@ v1.6.x 及更早版本里，`ls`/`get`/`put` 在失败时**仍返回退出码 0*
 其中 `get` 会把"下载失败"伪装成"下载完成 0 字节"。v1.7.0 起统一修复：
 
 - 引擎输出中的错误信号（"遇到错误, 远端服务器返回错误, 代码: N"）会被解析并抛错
-- 失败一律以退出码 1 结束，`--json` 输出带 `{"error": "...", "errno": N}`
+- 整次失败以退出码 1 结束，`--json` 输出带 `{"error": "..."}`；拿得到 errno 时还有 `errno`
 - `get` 额外检测"引擎返回 0 字节但远端应有大小"的情况
+- 批量命令**部分失败**也是退出码 1，但 `--json` 不一定有顶层 `error`：
+  `rm` 看 `failed`，`share cancel` 看数组里的 `ok`，`organize --apply` 看 `applied.failed`，
+  `dedup --remove-duplicates` 看 `removal.failed`
 
 **Agent 请务必检查退出码，不要只看 stdout 内容。**
 
@@ -110,7 +113,7 @@ v1.6.x 及更早版本里，`ls`/`get`/`put` 在失败时**仍返回退出码 0*
 - **全局选项位置自由**：`--json` / `--verbose` / `--no-meta` / `--legacy-json` / `--profile <name>` /
   `--json-file <path>` 放在命令前后都可以，布尔开关与带值选项可任意交错
   （如 `bdp --json --profile x error -3`）。
-- **带值选项的取值不能以 `--` 开头**：`bdp error -3 --profile --json` 报错退出 1
+- **带值选项的取值不能以 `-` 开头**（`-x` 和 `--json` 都不行）：`bdp error -3 --profile --json` 报错退出 1
   （此前会建出一个名为 `--json` 的垃圾 profile 并激活它）；
   `bdp --json-file --json error -3` 同理不会建出名为 `--json` 的文件。
 

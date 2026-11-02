@@ -88,7 +88,14 @@ function assertSafeOfflineUrl(url) {
 // markUntrusted（lib/sanitize.js）：CLI 的 JSON 通道把「来自网盘的正文」包上
 // <untrusted_file>…</untrusted_file> 边界标记，与 MCP 侧（lib/mcp.js 的 sanitizeToolResult）行为一致 ——
 // Agent 读到的正文一律是**数据**，不是可以执行的指令（防间接提示注入）。
-const { sanitizeControl, markUntrusted, redactLocalPaths, sanitizeErrorMessage } = require("../lib/sanitize");
+const {
+  sanitizeControl,
+  markUntrusted,
+  markUntrustedRawFields,
+  redactLocalPaths,
+  sanitizeErrorMessage,
+  capErrorMessage,
+} = require("../lib/sanitize");
 
 // ── Utils ──────────────────────────────────────────────
 
@@ -111,14 +118,14 @@ let jsonCtx = { command: null, profile: null, startedAt: Date.now(), noMeta: fal
 
 function output(data, jsonFlag, formatter) {
   if (jsonFlag) {
-    console.log(JSON.stringify(withMeta(data, jsonCtx), null, 2));
+    console.log(JSON.stringify(withMeta(markUntrustedRawFields(data), jsonCtx), null, 2));
   } else if (formatter) {
     formatter(data);
   }
 }
 
 function emitJson(data, args) {
-  const json = JSON.stringify(withMeta(data, jsonCtx), null, 2);
+  const json = JSON.stringify(withMeta(markUntrustedRawFields(data), jsonCtx), null, 2);
   if (args.flags.jsonFile) {
     // 0600：JSON 里可能带 MCP 令牌，别让同机其他用户读到（POSIX 生效；Windows 需自行收紧 ACL）
     require("fs").writeFileSync(args.flags.jsonFile, json, { encoding: "utf-8", mode: 0o600 });
@@ -754,7 +761,9 @@ cmds.ls = async (args, json) => {
     }, args);
     return;
   }
-  console.log(info.raw);
+  // ⚠️ 引擎原文是**远端可控**的 —— 直出终端等于让远端文件名里的 ESC/OSC 劫持终端。
+  // 人读版也要过 sanitizeControl（保留 \t \n \r，只删控制字符与方向控制符）。
+  console.log(sanitizeControl(info.raw));
 };
 
 cmds.search = async (args, json) => {
@@ -946,7 +955,7 @@ cmds.get = async (args, json) => {
 
   // BaiduPCS-Go 回退引擎（目录 / 无 dlink）：保持旧输出
   if (info.engine === "pcs") {
-    console.log(info.raw);
+    console.log(sanitizeControl(info.raw));
     if (info.warning) console.error(`⚠️  ${info.warning}`);
     return;
   }
@@ -2555,7 +2564,7 @@ async function main() {
     try {
       config.useProfile(profile);
     } catch (e) {
-      console.error("[ERROR] " + sanitizeErrorMessage(e.message));
+      console.error("[ERROR] " + capErrorMessage(sanitizeErrorMessage(e.message)));
       process.exit(1);
     }
   }
@@ -2604,7 +2613,7 @@ async function main() {
       const info = hasErrno ? errorCodes.describeError(e.errno, { verbose: !!args.flags.verbose }) : null;
       emitJson(
         Object.assign(
-          { error: sanitizeErrorMessage(e && e.message ? e.message : String(e)) },
+          { error: capErrorMessage(sanitizeErrorMessage(e && e.message ? e.message : String(e))) },
           hasErrno ? { errno: e.errno } : {},
           info ? { errorCode: info } : {}
         ),
@@ -2613,7 +2622,7 @@ async function main() {
     } else {
       // 与 MCP 侧共用 sanitizeErrorMessage（控制字符剔除 + 标记中和 + 路径脱敏）——
       // 此前 CLI 侧只脱敏路径、**没做**控制字符剔除与标记中和，两侧口径不一致。
-      console.error("[ERROR] " + sanitizeErrorMessage(e.message));
+      console.error("[ERROR] " + capErrorMessage(sanitizeErrorMessage(e.message)));
     }
     exitCode = 1;
   } finally {

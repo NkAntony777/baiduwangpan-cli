@@ -34,11 +34,33 @@
 - 新增 `test/mcp-args.test.js`（4 条 / 15 个非法参数用例）：
   参数错误矩阵、`bdp_mkdir {path:123}` **不得触发引擎**、端到端 `error.code === -32001`、
   合法参数（含空格路径）不被误伤。
-- 测试总数 410 → **414**。
+- 新增 `test/output-sanitize.test.js`（6 条）：`raw` 字段边界标记（含嵌套/数组、
+    跳过 `__proto__`）、错误消息限长、先净化再限长的顺序、人读版不再直出引擎原文。
+- 测试总数 410 → **420**。
+
+### 🔒 输出净化（`raw` 字段 / 人读版 / 错误长度）
+
+- **CLI `--json` 的 `raw` 字段未标记**：引擎原文是**远端可控**的内容（会回显远端文件名 / 错误文本），
+  此前直接交给 Agent，等于让它把「数据」当「指令」。现在与 MCP 侧一致，包上
+  `<untrusted_engine_output>…</untrusted_engine_output>`（深度遍历，只处理名为 `raw` 的字符串字段）。
+- **人读版 `bdp ls` / `bdp get` 直出引擎原文**：远端文件名里的 ESC / OSC 能劫持终端
+  （清屏、改标题、写剪贴板）。现在同样过 `sanitizeControl`（保留 `\t` / `\n` / `\r`）。
+- **CLI 错误消息无长度上限**：实测引擎一大段输出能让 `--json` 的 `error` 达 50KB，
+  一次失败就把 Agent 上下文挤爆；MCP 侧早就有 1000 字符上限，两侧文案因此不一致。
+  新增共享的 `capErrorMessage()`（`lib/sanitize.js`，上限 1000），CLI 与 MCP 用**同一个常量**。
+
+### 📚 文档
+
+- 文档对拍（按 v1.11.1 之后的实现，不沿用对 `f09d5a1` 的旧结论）：
+  `quota` 走引擎，不是 web API；`bdp config` 的 `pcsPath` / `browserProfile` 始终脱敏成 `<local-path>`；
+  批量部分失败（`rm` / `share cancel` / `organize --apply` / `dedup --remove-duplicates`）退出码为 1，JSON 不一定有顶层 `error`；
+  同步子进程写明 `gdownload` 与预览 HEAD 在 native 下仍会走到；全局带值选项拒绝以 `-` 开头（不只是 `--`）。
+- `commands.md` 补上 `groups` / `gshares` / `gls` / `gsearch`。
+- MCP 参数口径与 v1.11.2 实现对齐：路径必须是字符串；`bdp_read` 的 `lines` 必须是整数；`confirm` 必须是布尔 `true`。
 
 ### 📦 分发
 
-- 重新构建 `baiduwangpan-skill.zip`（38,346 字节 / 8 个文件）。
+- 重新构建 `baiduwangpan-skill.zip`（40,748 字节 / 8 个文件）。
 - **npm 上仍为 1.10.2**：`v1.11.0` / `v1.11.1` 是未发布的开发 tag，首次发布将是本版。
 
 ---

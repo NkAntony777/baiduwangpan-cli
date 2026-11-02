@@ -299,6 +299,12 @@ bdp serve --mcp --http --port 8765 --token-file ~/.bdp/mcp.token   # HTTP 传输
 | `bdp_quota` / `bdp_groups` / `bdp_gsearch` | 配额与群聊 | 只读 |
 | `bdp_error` | 解释错误码（结构化：code/codeText/name/description/severity/retryable/action；`verbose:true` 才附带 internalDetail） | 只读 |
 
+> **参数传错是 `-32001`（user-error，不要重试，也不要当成百度侧故障）**，引擎不会被调用：
+> - 网盘路径、`bdp_put` 的 `local`、`bdp_gsearch` 的 `gid` / `keyword` 必须是**字符串**。数字 `123` 不会被当成路径。路径最长 4096，不能含控制字符。
+> - `bdp_read` 的 `lines` 不传则是 20；传了就必须是整数 `1`–`10000`。字符串 `"20"` 不行。
+> - `bdp_remove` 的 `confirm` 必须是布尔 `true`。字符串 `"true"` 不行。
+> - `bdp_organize` 至少要给一个维度：`byType` / `byYear` / `bySource`。
+
 **HTTP 端点**：
 
 | 端点 | 说明 |
@@ -345,6 +351,7 @@ bdp dedup <path> --remove-duplicates --yes
   —— 两者之差即被 size 误判、实为不同内容的文件
 - `--remove-duplicates` 删除重复副本，**走百度回收站（可恢复）**
 - 非交互环境必须显式 `--yes`（与 `bdp rm` 一致）；先 `--dry-run` 预览更稳妥
+- 实际删除时只要有一条没删掉，退出码就是 1。`--json` 看 `removal.failed`，不一定有顶层 `error`
 
 ```bash
 bdp dedup /med --top 50
@@ -472,7 +479,8 @@ bdp rm <path> [path2 ...] [--dry-run] [--yes]
 
 ⚠️ 高危操作，Agent 使用前必须用户确认。
 
-- 支持批量删除（v1.7.0），`--json` 返回每个路径的 `ok`/`error`
+- 支持批量删除（v1.7.0），`--json` 返回 `{ results, deleted, failed }`，每条在 `results[].ok` / `results[].error`
+- 有任何一条没删掉，退出码为 1。这组 JSON **没有**顶层 `error`，要看 `failed`
 - **非交互环境（Agent / 管道）必须显式加 `--yes`**，否则拒绝执行并返回退出码 1
 - 交互式终端会弹 y/N 确认
 - 删除的文件可在回收站找回
@@ -647,6 +655,8 @@ bdp share cancel <shareId> [shareId2 ...]
 bdp share list
 ```
 
+- `cancel` 逐条执行：一条失败不影响后面的 id。有失败则退出码 1
+- `--json` 的 `cancel` 仍是**裸数组**（不加 `meta`），元素为 `{ shareId, ok, error? }`
 - ⚠️ **创建公开分享链接需要 `--yes`**（非交互环境）—— 链接一旦生成，任何拿到它的人都能访问该文件
 - `--combined` 直接输出带提取码的可复制链接
 - `share list` 走**网页 API** `/share/record`（v1.7.0 起）。
@@ -666,9 +676,11 @@ bdp --profile <name> <命令>            # 全局参数，命令前/后均可
 bdp serve --mcp                       # 启动 MCP 服务器（stdio）
 ```
 
-> `bdp config` 与 `bdp config --json` **默认脱敏** BDUSS/STOKEN
+> `bdp config` 与 `bdp config --json` **默认脱敏** BDUSS / STOKEN / cookie
 > （前 10 位 + `...` + 后 4 位，JSON 带 `"redacted": true`）。
-> 仅在用户明确要求时才用 `--show-secrets`。
+> `pcsPath` 和 `browserProfile` **始终**换成 `<local-path>`，与 `bdp whoami` 相同。
+> `--show-secrets` 只还原凭证字段，**不会**把这两条本地路径还原出来。
+> 仅在用户明确要求看凭证原文时才用 `--show-secrets`。
 
 ### `bdp config --set` 可设置的键
 
@@ -704,6 +716,49 @@ bdp config --set webTransport native --json
 | `BDP_STOKEN` | STOKEN cookie | 无 |
 | `BAIDUPCS_CMD` | BaiduPCS-Go 路径 | 自动检测 |
 | `BDP_MAX_CAT_BYTES` | cat 最大读取字节 | 1048576 |
+
+### groups — 列出群组
+
+```
+bdp groups
+```
+
+- `--json` 返回**裸数组**（历史接口，不加 `meta`）
+- 每项含群名和 `gid`。后面的群命令都要用这个 `gid`
+
+### gshares — 群内分享库
+
+```
+bdp gshares <gid> [--no-cache]
+```
+
+- 列出该群顶层分享。`--json` 同样是**裸数组**
+- 每项含 `name` / `fsId` / `msgId` / `fromUser`，交给 `gls` / `gdownload`
+
+### gls — 浏览群文件
+
+```
+bdp gls <gid> <fs_id> [--page N] [--page-size N] [--from-uk X] [--msg-id Y] [--parent-fs-id Z] [--no-cache]
+```
+
+- 默认 `--json` 是带 `meta` 的对象（含 `files`）
+- `--legacy-json` 只输出 `files` 裸数组，不加 `meta`
+- `--page` 默认 1；`--page-size` 默认 50，最大 100
+- 传入的 `fromUk` / `msgId` 与群不匹配（errno=2131）时，会改用 `gshares` 解析出的参数
+
+### gsearch — 搜索群文件名
+
+```
+bdp gsearch <gid> <keyword> [--page N] [--limit N] [--depth N] [--concurrency N]
+    [--max-pages N] [--max-requests N] [--timeout N] [--save-partial]
+    [--any-word] [--exact] [--no-unique] [--no-cache]
+```
+
+- 按文件名搜索，不下载。落到本地用 `gdownload`（这一步始终是同步 curl，见上文）
+- 默认多个关键词都要命中；`--any-word` 改为命中任意一个
+- `--depth` 默认 1，`--limit` 默认 50，`--concurrency` 默认 4，`--max-pages` 默认 50，`--max-requests` 默认 400
+- `--timeout` 默认 0（不限时）；到点返回已经扫到的部分结果
+- 默认 `--json` 是带 `meta` 的对象；`--legacy-json` 才是裸数组
 
 ### gtree — 构建群目录树
 

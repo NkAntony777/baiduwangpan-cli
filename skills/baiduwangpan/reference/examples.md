@@ -166,13 +166,12 @@ bdp gsearch <gid> "玄空飞星资料" --exact --json # 文件名精确匹配（
 
 **whoami**：
 ```json
-{ "loggedIn": true, "bduss": "***set***", "stoken": "***set***", "pcsPath": "...", "configFile": "..." }
+{ "loggedIn": true, "bduss": "***set***", "stoken": "***set***", "webTransport": "native", "pcsPath": "<local-path>", "configFile": "<local-path>", "profile": "default(全局)" }
 ```
 
-**错误输出**（所有命令）：
+**错误输出**（整次失败）：
 ```json
 { "error": "错误消息文本" }
-}
 ```
 > 有 errno 时会额外带 `errno` 与结构化的 `errorCode`（`code`/`name`/`severity`/`retryable`/`action`）。
 
