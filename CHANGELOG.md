@@ -4,6 +4,53 @@
 
 -----
 
+## v1.11.3 — 2026-11-02
+
+> 主题：**把剩下的同步 curl 和缺的命令补上**。群文件下载、curl 传输、预览 HEAD 不再冻住事件循环。MCP 补齐群工具。CLI 补上 `rename` 与 `doctor`。
+
+### 🔧 修复
+
+- **curl 传输与群文件下载改为异步 spawn**（`lib/http.js` 的 `spawnCollected`）。`webTransport=curl`、`gdownload`、预览 HEAD 兜底都不再 `spawnSync`。下载时限不变（单文件约 3600s、打包约 7200s），但只占这一次调用。
+- **`bdp_search` 的 keyword、`bdp_ask` 的 query 必须是字符串**。数字不会再被悄悄当成搜索词。
+- **`bdp_rename` 的非字符串 `from`/`to` 会真的改名**（`-32001`）：此前 `{to: 123}` 被
+  `String()` 成 `"123"`、`{to: {}}` 成 `"[object Object]"`、`{from: 123}` 成 `"/123"`，
+  `dryRun:false` 时**真的在网盘上改名** —— 与 v1.11.2 修的 `bdp_mkdir {path:123}` 同一类
+  （非字符串被静默强转成真实写操作）。现在 `files[]` 逐项校验类型/长度；`renameFiles` 也加了
+  兜底不再是 `String()` 照改。目标名的语义（含 `/`、`.`、`..`、控制字符）仍是**逐条**记失败
+  —— 批量接口不该因为一条坏名字整批中止。
+- **`bdp_organize` 的 `target` 未校验类型**：`{target: 123}` 会把数字当成目标根目录。现在必须是字符串路径。
+- **`bdp config --set --json` 的 `file` 脱敏**，与 whoami 一样不再回显本地绝对路径。
+
+### ✨ 功能
+
+- **MCP 群工具**：`bdp_gshares` / `bdp_gls` / `bdp_gtree` / `bdp_gdownload`。下载必须传布尔 `confirm: true`。
+- **`bdp rename <path> <newName>`**：与 `bdp_rename` 同一套规则，默认 dry-run，`--yes` 才改名。目标不能含 `/`、`\`，不能是 `.` 或 `..`。
+- **`bdp doctor`**：一次报出登录态、配置是否可读、引擎能否启动、索引是否在 7 天内。索引过期只警告。输出不含本地路径。
+- **`npm run bench:concurrency`**：不连真实网盘的 1/2/4/8 并发曲线，可进 CI。
+
+### 🧪 测试
+
+- `test/envelope-read.test.js`：cat/head/tail/grep 的 `--json` 用假引擎和本机 HTTP 验证信封，不再因没有网盘账号而跳过。
+- `test/async-curl.test.js`、`test/rename-doctor.test.js`，以及 MCP 参数矩阵补上群工具和 search/ask。
+- `test/rename-args.test.js`：`bdp_rename` / `bdp_organize.target` 的参数闸门（含「参数错误与
+  dry-run 都**不得**触发真实 mv」这条，直接对着上面那个写操作缺陷）。
+- `test/bench-concurrency.test.js`：基准脚本同时守**库式入口**（`runLevel` 的 4 路墙钟）与
+  **CLI 入口**（曲线真的输出两档 / 闸门被抬到 16 / **只有一档必须 FAIL**）。
+  后者是写测试时立刻抓到的脚本自身 bug：`--levels` 用 `parseInt("1,4")` 解析 → 恒等于 1，
+  曲线只剩一档而判定条件写的是 `results.length > 1 && …` → **静默通过**。
+- **契约 9 从「扫固定 4 个文件」改成「全目录扫 `lib/`+`bin/` + 白名单」**：此前新增的
+  `lib/doctor.js`、`lib/rename.js` 根本不在扫描范围，「只要新开一个文件就能绕过全部保证」。
+  白名单每条都写明理由（chcp / command -v / taskkill），且白名单文件里用 `spawnSync` 起**引擎**
+  仍然算违规。已用探针文件实测：新文件里的 `spawnSync(cfg.pcsPath)` 现在会被抓出来。
+- 测试总数 420 → **433**。
+
+### 📦 分发
+
+- 重新构建 `baiduwangpan-skill.zip`（40,767 字节 / 8 个文件）。
+- **npm 上仍为 1.10.2**。v1.11.x 都还没发，首次发布将带上这一版。
+
+---
+
 ## v1.11.2 — 2026-11-02
 
 > 主题：**MCP 参数校验统一到 -32001** —— 四路审核的 P2-4 发现。
@@ -54,7 +101,7 @@
 - 文档对拍（按 v1.11.1 之后的实现，不沿用对 `f09d5a1` 的旧结论）：
   `quota` 走引擎，不是 web API；`bdp config` 的 `pcsPath` / `browserProfile` 始终脱敏成 `<local-path>`；
   批量部分失败（`rm` / `share cancel` / `organize --apply` / `dedup --remove-duplicates`）退出码为 1，JSON 不一定有顶层 `error`；
-  同步子进程写明 `gdownload` 与预览 HEAD 在 native 下仍会走到；全局带值选项拒绝以 `-` 开头（不只是 `--`）。
+  全局带值选项拒绝以 `-` 开头（不只是 `--`）。
 - `commands.md` 补上 `groups` / `gshares` / `gls` / `gsearch`。
 - MCP 参数口径与 v1.11.2 实现对齐：路径必须是字符串；`bdp_read` 的 `lines` 必须是整数；`confirm` 必须是布尔 `true`。
 

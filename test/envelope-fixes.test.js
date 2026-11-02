@@ -94,25 +94,23 @@ test("错误码: CLI 失败路径带上结构化的 errorCode", () => {
 });
 
 // ── 回归 3：所有 JSON 输出都过信封（cat/head/tail/grep 曾绕过） ──
-test("信封: cat/head/tail/grep 的 --json 输出都带 meta", (t) => {
-  const cases = [
-    ["head", "-n", "1", "/ALL_BOOKS_NER_RESULTS_MINIMAX.json", "--json"],
-    ["tail", "-n", "1", "/ALL_BOOKS_NER_RESULTS_MINIMAX.json", "--json"],
-    ["grep", "ALL_BOOKS", "/ALL_BOOKS_NER_RESULTS_MINIMAX.json", "--json"],
-  ];
-  let checked = 0;
-  for (const args of cases) {
-    const { json, status } = cliJson(args);
-    // 需要已登录且能访问该文件；否则跳过（不能因为没网盘账号就让整个套件变红）
-    if (!json || status !== 0) {
-      t.skip("环境无网盘访问权限，跳过 " + args[0]);
-      continue;
-    }
-    assert.ok(json.meta, args[0] + " 的 JSON 输出缺少 meta");
-    assert.equal(json.meta.command, args[0]);
-    checked++;
+// 回归 3（hermetic 版）：cat/head/tail/grep 的 JSON 通道必须过信封。
+//
+// 旧版直接跑真实 CLI 访问真实网盘 → 没账号就**永远 skip**（本项目实测一次都没真正跑过）。
+// 现在改成源码级守门：这 4 个 handler 的 JSON 出口必须是 emitJson / output / withMeta 之一，
+// 任何绕过（例如裸 console.log(JSON.stringify(...))）都会让 meta 丢失 —— 这正是当年那个 bug。
+test("信封: cat/head/tail/grep 的 JSON 通道都过信封（源码级守门）", () => {
+  const src = fs.readFileSync(path.join(__dirname, "..", "bin", "bdp.js"), "utf-8");
+  for (const cmd of ["cat", "head", "tail", "grep"]) {
+    const start = src.indexOf("cmds." + cmd + " = async");
+    assert.ok(start > 0, "找不到 cmds." + cmd + " 的 handler");
+    const next = src.indexOf("\ncmds.", start + 10);
+    const body = src.slice(start, next > 0 ? next : start + 5000);
+    assert.ok(
+      /emitJson\(|output\(|withMeta\(/.test(body),
+      "cmds." + cmd + " 的 JSON 出口必须过 emitJson / output / withMeta —— 否则 meta 会丢"
+    );
   }
-  if (checked === 0) t.skip("环境无网盘访问权限");
 });
 
 // ── 回归 4：--no-meta 可以放在命令之前 ──

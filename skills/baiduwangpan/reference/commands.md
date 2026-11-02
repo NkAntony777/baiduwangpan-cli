@@ -219,7 +219,7 @@ bdp organize [path] --by type --apply --yes   # 执行（真实移动网盘文�
 v1.9.0 起，每条命令的 `--json` 输出都会**追加**一个 `meta` 字段（只追加，不改任何既有字段）：
 
 ```json
-"meta": { "command": "ls", "version": "1.11.2", "profile": null, "elapsedMs": 42 }
+"meta": { "command": "ls", "version": "1.11.3", "profile": null, "elapsedMs": 42 }
 ```
 
 | 字段 | 含义 |
@@ -260,12 +260,8 @@ bdp               # → 打印帮助，退出码 0（裸跑惯例）
 **同步引擎路径：已清零**（v1.11.0，v1.11.1 复核）—— 此前 15 条命令走同步引擎（`spawnSync` 冻结
 整个事件循环，引擎挂死 = MCP 服务器整体不可用）。现已全部改为异步 spawn，写操作不再冻住事件循环。
 
-> **仍存在的同步子进程**（都不是 BaiduPCS-Go）：`webTransport=curl` 时，Web API 与 Range 读取仍同步 fork curl。
-> 下面两条**不看**传输模式是不是 native：
-> - 群文件下载（`gdownload`，以及 `get` 的 `gid:fs_id`）始终同步 curl。单文件最长约 3600s，多文件打包最长约 7200s，这段时间事件循环冻住。
-> - 预览取文件大小时，异步 HEAD 失败会再同步跑 `curl -I`（默认 native 下也会走到）。
->
-> 默认 native 下，cat / head / tail / grep / peek 的正文读取已是异步 fetch。
+> **curl 也不再冻住事件循环**（v1.11.3）：`webTransport=curl` 的 Web API / Range、群文件下载（gdownload，以及 get 的 gid:fs_id）、预览 HEAD 兜底都是异步 spawn。
+> 下载时限仍是单文件约 3600s、打包约 7200s，但只占这一次调用。Windows 交互终端启动时会同步查一次代码页，耗时可以忽略。
 
 > 引擎调用都走 `lib/pan.js` 的异步 runner（`lib/pcs-extra.js`、`lib/preview.js` 的 locate、登录同步凭证都复用它）。
 > 到点会杀掉该子进程，只有这一次调用失败（`severity: retryable`）。
@@ -283,7 +279,7 @@ bdp serve --mcp                                          # stdio 传输（本地
 bdp serve --mcp --http --port 8765 --token-file ~/.bdp/mcp.token   # HTTP 传输（独立进程/远程 agent）
 ```
 
-**19 个工具**，其中写操作让 Agent 能自主整理：
+**23 个工具**，其中写操作让 Agent 能自主整理：
 
 | 工具 | 用途 | 安全约束 |
 |:-----|:-----|:---------|
@@ -296,7 +292,8 @@ bdp serve --mcp --http --port 8765 --token-file ~/.bdp/mcp.token   # HTTP 传输
 | `bdp_rename` | 批量重命名（**仅同目录**，目标不能含路径分隔符） | 写（**默认 dryRun**） |
 | `bdp_remove` | 删除 | 写（**必须 confirm:true**；走回收站可恢复） |
 | `bdp_get` / `bdp_put` / `bdp_mkdir` | 下载 / 上传 / 建目录 | 写 |
-| `bdp_quota` / `bdp_groups` / `bdp_gsearch` | 配额与群聊 | 只读 |
+| `bdp_quota` / `bdp_groups` / `bdp_gshares` / `bdp_gls` / `bdp_gtree` / `bdp_gsearch` | 配额与群聊 | 只读 |
+| `bdp_gdownload` | 群文件下载到本地 | 写（**必须 confirm:true**，布尔值） |
 | `bdp_error` | 解释错误码（结构化：code/codeText/name/description/severity/retryable/action；`verbose:true` 才附带 internalDetail） | 只读 |
 
 > **参数传错是 `-32001`（user-error，不要重试，也不要当成百度侧故障）**，引擎不会被调用：
@@ -615,7 +612,7 @@ bdp error --list --json     # 列出全部已知错误码
   "error": "文件或目录不存在",
   "errno": 31066,
   "errorCode": { "code": 31066, "name": "FILE_NOT_FOUND", "severity": "user-error", "retryable": false, "action": "…" },
-  "meta": { "command": "ls", "version": "1.11.2", "profile": null, "elapsedMs": 12 }
+  "meta": { "command": "ls", "version": "1.11.3", "profile": null, "elapsedMs": 12 }
 }
 ```
 
@@ -782,6 +779,7 @@ bdp gdownload <gid> <fs_id>... [-o <dir>] [--filename NAME] [--from-uk X] [--msg
 ```
 
 - 逆向 `/api/sharedownload`，**直接下载**群文件 —— **不需要先转存到自己的网盘**
+- MCP 的 `bdp_gdownload` 必须传布尔 `confirm: true`。下载走异步 curl，时限约 3600s（打包约 7200s），不再冻住整个进程
 - 单文件直下；多个 `fs_id`（同一条消息）自动 zip 打包下载
 - 限制（实测，2026-08）：单文件 ≤ ~20MB；同消息多文件总包 ≤ ~100MB；更大的文件受百度限制
 

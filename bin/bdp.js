@@ -627,6 +627,23 @@ cmds.organize = async (args, json) => {
   // 部分失败 → 退出码 1（否则 Agent 只看退出码，会把「部分没移动」当成「全部成功」）
   if (applied && applied.failed > 0) return 1;
 };
+cmds.doctor = async (args, json) => {
+  const report = await require("../lib/doctor").doctor();
+  if (json || args.flags.jsonFile) {
+    emitJson(report, args);
+  } else {
+    console.log((report.ok ? "✅" : "❌") + " 诊断" + (report.ok ? "通过" : "有问题"));
+    console.log("  登录    " + (report.login.ok ? "已登录" : "未登录"));
+    console.log("  配置    " + report.config.detail);
+    console.log("  引擎    " + report.engine.detail);
+    console.log("  索引    " + report.index.detail + (report.index.files ? "（" + report.index.files + " 个文件）" : ""));
+    if (report.warnings.length) {
+      report.warnings.forEach((w) => console.log("  - " + w));
+    }
+  }
+  if (!report.ok) return 1;
+};
+
 cmds.config = async (args, json) => {
   // --set <key> <value>：写入配置（白名单 + 值校验）
   if (args.flags.set !== undefined) {
@@ -665,14 +682,14 @@ cmds.config = async (args, json) => {
       value: r.value,
       previous: r.previous === undefined ? null : r.previous,
       scope: r.scope || 'global',
-      file: config.CONFIG_FILE,
+      file: redactLocalPaths(config.CONFIG_FILE),
     };
     if (json || args.flags.jsonFile) {
       emitJson(payload, args);
       return;
     }
     console.log("✅ 已设置 " + key + " = " + r.value);
-    console.log("   配置文件: " + config.CONFIG_FILE);
+    console.log("   配置文件: " + redactLocalPaths(config.CONFIG_FILE));
     return;
   }
 
@@ -978,7 +995,7 @@ cmds.put = async (args, json) => {
     return;
   }
   const raw = await pan.upload(local, remote);
-  output({ local, remote, ok: true, raw }, json, () => console.log(raw));
+  output({ local, remote, ok: true, raw }, json, () => console.log(sanitizeControl(raw)));
 };
 
 cmds.mkdir = async (args, json) => {
@@ -1143,6 +1160,29 @@ cmds.mv = async (args, json) => {
   if (!src || !dst) { console.error("Usage: bdp mv <src> <dst>"); process.exit(1); }
   const r = await pcsExtra.mv(src, dst);
   output(r, json, () => console.log(`✅ ${r.op === "rename" ? "已重命名" : "已移动"}: ${src} → ${dst}`));
+};
+
+cmds.rename = async (args, json) => {
+  const from = args._[0];
+  const to = args._[1];
+  if (!from || !to) {
+    console.error("Usage: bdp rename <path> <newName> [--yes]");
+    process.exit(1);
+  }
+  const dryRun = args.flags.yes !== true;
+  const r = await require("../lib/rename").renameFiles([{ from, to }], { dryRun });
+  if (json || args.flags.jsonFile) {
+    emitJson(r, args);
+  } else {
+    r.results.forEach((item) => {
+      if (!item.ok) console.error("❌ " + (item.from || "") + ": " + item.error);
+      else if (item.dryRun) console.log("[dry-run] " + item.from + " → " + item.to);
+      else if (item.skipped) console.log("ℹ️  名称未变: " + item.from);
+      else console.log("✅ 已重命名: " + item.from + " → " + item.to);
+    });
+    if (dryRun) console.log("提示：加 --yes 才会真正改名");
+  }
+  if (r.failed > 0) return 1;
 };
 
 cmds.cp = async (args, json) => {
@@ -2041,6 +2081,15 @@ const COMMANDS = {
     flags: [],
     examples: ["bdp mv /文档/a.pdf /文档/b.pdf", "bdp mv /文档/a.pdf /备份/"],
   },
+  rename: {
+    group: "pan",
+    usage: "bdp rename <path> <newName> [--yes]",
+    desc: "只改文件名（默认 dry-run，--yes 才执行）",
+    flags: ["yes"],
+    note: "目标不能含 / 或 \\，不能是 . 或 ..。跨目录移动用 bdp mv。",
+    options: ["--yes  真正改名（不加则只预览）"],
+    examples: ["bdp rename /文档/a.pdf b.pdf", "bdp rename /文档/a.pdf b.pdf --yes"],
+  },
   cp: {
     group: "pan",
     usage: "bdp cp <src> <dst>",
@@ -2207,6 +2256,14 @@ const COMMANDS = {
     desc: "查看登录状态与当前 profile",
     flags: [],
     examples: ["bdp whoami --json"],
+  },
+  doctor: {
+    group: "config",
+    usage: "bdp doctor",
+    desc: "一次报出登录态、引擎、配置和索引新鲜度",
+    flags: [],
+    note: "索引超过 7 天只给警告，不单独导致失败。输出不含本地绝对路径。",
+    examples: ["bdp doctor", "bdp doctor --json"],
   },
   config: {
     group: "config",

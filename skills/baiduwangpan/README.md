@@ -71,7 +71,7 @@ baiduwangpan/
 | 分页与限流 | `--limit` / `--page` / `--max-results` / `--fields` |
 | 编码自动识别 | UTF-8 / GBK / Big5 自动判别（中文古籍不再乱码） |
 | 二进制安全 | PDF/zip/图片等拒绝按文本读取，避免乱码灌入上下文 |
-| MCP 接入 | `bdp serve --mcp`（stdio，**19 个**带 schema 的工具；含移动/重命名/删除） |
+| MCP 接入 | `bdp serve --mcp`（stdio，**23 个**带 schema 的工具；含移动/重命名/删除） |
 
 ## 安全说明
 

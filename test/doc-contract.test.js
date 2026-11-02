@@ -173,25 +173,99 @@ function parseSyncEngineList(md) {
 }
 
 /**
- * 源码里走**同步**引擎的调用点总数 —— **v1.11.0 起必须为 0**。
+ * 剥掉注释后再扫描 —— 否则「注释里提到 spawnSync」会被当成真调用。
+ * 这不是洁癖：`lib/pan.js` 的注释里就写着「此前默认配置下 cat/head/grep 仍产生
+ * spawnSync("curl")」，它必须不触发契约失败；而真调用必须触发。
  *
- * 判定两件事：
- *   1. 没有任何地方用 spawnSync 启动 BaiduPCS-Go 引擎进程（它会冻结整个事件循环）
- *   2. 不存在**同步**的 runPCS / runPCSResult 包装器（async 的不算）
+ * 已知取舍：不做完整 JS 词法分析 —— 整行注释（`//` `*` `/*` 开头）直接丢，
+ * 行尾注释按「引号奇偶」判断是否在字符串里。够用于本契约，且方向是**放宽**（不会误报）。
  */
-function countSyncEngineCallSites() {
-  // ⚠️ 必须包含 bin/ —— 此前只扫 lib/ 三个文件，
-  // 于是 bin/bdp.js 里的 spawnSync(cfg.pcsPath, ["login", …]) 逃过了这道闸门。
-  const files = ["lib/pan.js", "lib/pcs-extra.js", "lib/preview.js", "bin/bdp.js"];
-  let n = 0;
-  for (const f of files) {
-    const src = read(path.join(ROOT, f));
-    // 同步 spawn 引擎
-    n += (src.match(/spawnSync\(\s*(?:cfg\.)?pcsPath/g) || []).length;
-    // 同步的引擎包装器（async function runPCS( 不算）
-    n += (src.match(/^(?!async )function runPCS(?:Result)?\(/gm) || []).length;
+function stripComments(src) {
+  return src
+    .split("\n")
+    .map((line) => {
+      const t = line.trim();
+      if (t.startsWith("//") || t.startsWith("*") || t.startsWith("/*")) return "";
+      const idx = line.indexOf("//");
+      if (idx < 0) return line;
+      const before = line.slice(0, idx);
+      const quotes = (before.match(/["'`]/g) || []).length;
+      return quotes % 2 === 1 ? line : before; // 引号奇数 = // 在字符串里
+    })
+    .join("\n");
+}
+
+/** 递归列出目录下所有 .js（契约 9 用：全目录扫描，不维护文件清单） */
+function listJsFiles(dir) {
+  const out = [];
+  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+    const p = path.join(dir, e.name);
+    if (e.isDirectory()) out.push(...listJsFiles(p));
+    else if (e.name.endsWith(".js")) out.push(p);
   }
-  return n;
+  return out;
+}
+
+/**
+ * 允许保留**同步子进程**的文件白名单 —— 每一条都必须写清理由。
+ * 不在这张表里的文件出现 spawnSync/execFileSync/execSync → 契约失败。
+ */
+const SYNC_CP_ALLOW = new Map([
+  [
+    "lib/console.js",
+    {
+      re: /\b(?:spawnSync|execSync)\(/g,
+      why: "chcp 代码页探测/设置：CLI 启动最早期，单次，不涉及引擎与网络",
+    },
+  ],
+  [
+    "lib/browser-login.js",
+    {
+      re: /\bexecSync\(/g,
+      why: "command -v 环境探测 + taskkill 进程清理：一次性，非引擎、非网络",
+    },
+  ],
+]);
+
+/**
+ * 源码里走**同步**引擎的调用点 —— **v1.11.0 起必须为 0**。
+ *
+ * 判定三件事（**全目录扫描 lib/ 与 bin/，不维护文件清单**）：
+ *   1. 白名单之外不出现任何同步子进程调用（spawnSync/execFileSync/execSync）
+ *   2. 任何地方都不许用 spawnSync 起**引擎**（哪怕该文件在白名单里）
+ *   3. 不存在**同步**的 runPCS / runPCSResult 包装器（async 的不算）
+ *
+ * ⚠️ 为什么从「写死 4 个文件」改成全扫描：
+ *    此前写死 `lib/pan.js`/`lib/pcs-extra.js`/`lib/preview.js`/`bin/bdp.js`，
+ *    第一次漏了 bin/（登录走 spawnSync 逃过闸门），第二次漏了**新增文件** ——
+ *    `lib/doctor.js`、`lib/rename.js` 这类新模块根本不在扫描范围，
+ *    等于「只要新开一个文件就能绕过全部保证」。白名单比文件清单强：
+ *    新增同步调用必须**显式**把它加进白名单并写上理由（即被迫过审）。
+ */
+function scanSyncCallSites() {
+  const files = [...listJsFiles(path.join(ROOT, "lib")), ...listJsFiles(path.join(ROOT, "bin"))];
+  const detail = [];
+  for (const abs of files) {
+    const rel = path.relative(ROOT, abs).split(path.sep).join("/");
+    const src = stripComments(read(abs));
+
+    const syncAll = (src.match(/\b(?:spawnSync|execFileSync|execSync)\s*\(/g) || []).length;
+    const allow = SYNC_CP_ALLOW.get(rel);
+    const allowed = allow ? (src.match(allow.re) || []).length : 0;
+    if (syncAll > allowed) {
+      detail.push(rel + "：白名单外有 " + (syncAll - allowed) + " 处同步子进程调用");
+    }
+
+    // 白名单只放行「非引擎」的那几处；起引擎一律不行
+    const engineSync = (src.match(/spawnSync\(\s*(?:cfg\.)?(?:pcsPath|pcs|enginePath|binPath)/g) || [])
+      .length;
+    if (engineSync) detail.push(rel + "：用 spawnSync 起引擎 " + engineSync + " 处");
+
+    // 同步的引擎包装器（async function runPCS( 不算）
+    const syncWrapper = (src.match(/^(?!async )function runPCS(?:Result)?\(/gm) || []).length;
+    if (syncWrapper) detail.push(rel + "：有同步 runPCS 包装器 " + syncWrapper + " 个");
+  }
+  return { total: detail.length, detail, scanned: files.length };
 }
 
 /**
@@ -450,10 +524,16 @@ test("契约 8: bdp error 的 code 取值规则（三种写法命中 + 非登记
 // ── 契约 9：D9 同步遗留清单（三处一致 + 与实现对得上）────────────────────
 test("契约 9: 同步引擎路径已清零（源码无同步引擎调用 + 文档声明归零）", () => {
   // 1) 结构性保证：源码里**没有任何**同步引擎调用点
+  const scan = scanSyncCallSites();
+  assert.ok(
+    scan.scanned >= 10,
+    "契约 9 只扫到 " + scan.scanned + " 个文件 —— 全目录扫描本身被改坏了，这道闸门等于失效"
+  );
   assert.equal(
-    countSyncEngineCallSites(),
+    scan.total,
     0,
-    "仍有同步引擎调用点 —— 同步路径没有清干净（spawnSync 会冻结整个事件循环）"
+    "仍有同步调用点 —— 同步路径没有清干净（spawnSync 会冻结整个事件循环）：\n  " +
+      scan.detail.join("\n  ")
   );
 
   // 2) 文档：三处都必须声明「已清零」，且不得再把任何命令列成同步遗留

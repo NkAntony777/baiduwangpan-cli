@@ -23,7 +23,7 @@
 - **📄 免下载读取** — 通过 HTTP Range 直接读取文件内容到 stdout，无需下载整个文件
 - **👥 群聊文件浏览 + 下载** — 逆向 mbox API，列出群组、浏览群内分享库、搜索群文件，并支持**直接下载群文件到本地**（免转存）
 - **🤖 Agent 友好** — 所有命令支持 `--json` 结构化输出，零解析成本
-- **🔌 MCP 接入** — `bdp serve --mcp` 可作为 MCP 服务器运行（stdio 或 HTTP），工具描述与参数 schema 由客户端自动发现；19 个工具含移动/重命名/删除，Agent 可自主整理
+- **🔌 MCP 接入** — `bdp serve --mcp` 可作为 MCP 服务器运行（stdio 或 HTTP），工具描述与参数 schema 由客户端自动发现；23 个工具含移动/重命名/删除，Agent 可自主整理
 - **🗂️ 内容整理** — `bdp organize` 按类型/年份/来源生成归类方案，默认只出计划不动文件
 - **🌐 MCP over HTTP** — `bdp serve --mcp --http` 支持独立进程/远程 agent 接入（默认仅本机 + 令牌认证）
 - **📚 结构化目录/搜索** — `ls` / `search` 的 `--json` 返回真正的结构化 `entries[]`，不再需要解析文本表格
@@ -70,7 +70,7 @@
 | 群缓存管理 | `bdp cache [clear]` | 查看 / 清空会话缓存 |
 | 列出我的分享 | `bdp share list` | 网页 API，绕过引擎 panic bug |
 | 错误码释义 | `bdp error -3 [--json]` | 内置错误码字典（`--json` 返回结构化：code/codeText/name/description/severity/retryable/action；`--verbose` 附带 internalDetail） |
-| **MCP 服务器** | `bdp serve --mcp [--http]` | stdio 或 HTTP 传输，19 个带 schema 的工具（含写操作） |
+| **MCP 服务器** | `bdp serve --mcp [--http]` | stdio 或 HTTP 传输，23 个带 schema 的工具（含写操作） |
 
 ## 🚀 快速开始
 
@@ -255,7 +255,7 @@ bdp gdownload 539478953581833690 954615608563687 -o ./downloads
 | **mkdir 幂等** | 目录已存在不再报失败 |
 | **gls nextPage** | 补上 SKILL.md 一直引用却不存在的翻页字段 |
 | **error -3 可用** | 负数错误码此前无法执行（`bdp error -- -3` 现在也支持） |
-| **MCP 服务器** | `bdp serve --mcp [--http]` 暴露 19 个带 JSON Schema 的工具（含移动/重命名/删除，Agent 可自主整理） |
+| **MCP 服务器** | `bdp serve --mcp [--http]` 暴露 23 个带 JSON Schema 的工具（含移动/重命名/删除，Agent 可自主整理） |
 
 > v1.6.0 及更早版本的行为差异详见 [CHANGELOG.md](CHANGELOG.md)。
 
@@ -297,7 +297,7 @@ bdp share set <path> [--pwd P]   创建分享链接 [--combined 输出带密码�
 bdp share cancel <id>...         取消分享
 bdp share list                   列出分享 (受 BaiduPCS-Go v4.0.1 引擎 bug 限制)
 bdp profile list / use <name>    多账号 profile 管理
-bdp serve --mcp                 启动 MCP 服务器 (stdio) -- 19 个带 schema 的工具
+bdp serve --mcp                 启动 MCP 服务器 (stdio) -- 23 个带 schema 的工具
 bdp serve --mcp --http [--port N] [--host H] [--token T]  MCP over HTTP
                               (默认仅绑 127.0.0.1 + Bearer 令牌; /health 免令牌)
 bdp config --set <key> <value>  设置配置项 (白名单: webTransport/maxBytes/ua/pcsPath)
@@ -334,7 +334,7 @@ bdp error --list [--json]       列出全部已知错误码
 
 ### 通用选项
 
-> 当前共 **37** 条 CLI 命令、**19** 个 MCP 工具、**13** 个内置错误码。
+> 当前共 **39** 条 CLI 命令、**23** 个 MCP 工具、**13** 个内置错误码。
 
 ```
 --json                           JSON 结构化输出 (Agent 友好)
@@ -387,11 +387,9 @@ bdp error --list [--json]       列出全部已知错误码
 > 写操作不再冻住事件循环。读操作默认 120s、写操作 600s；登录时同步引擎凭证单独限 30s。
 > 到点会杀掉该子进程，只有这一次调用失败。
 
-> **仍存在的同步子进程**（都不是 BaiduPCS-Go，而且下面两条**不看**是不是 native 传输）：
-> 群文件下载（`gdownload`，以及 `get` 的 `gid:fs_id`）始终同步 fork curl，单文件最长约 3600s、多文件打包最长约 7200s，这段时间事件循环是冻住的。
-> 预览要文件大小时，异步 HEAD 失败会再同步跑一次 `curl -I`，默认 native 下也会走到。
-> `webTransport=curl` 时，Web API 和 Range 读取仍是同步 curl。
-> 默认 native 下，cat / head / tail / grep / peek 的正文读取已经是异步 fetch。
+> **curl 也不再冻住事件循环**（v1.11.3）：`webTransport=curl` 的 Web API / Range、群文件下载、预览 HEAD 兜底都改成异步 spawn。
+> 下载时限仍是单文件约 3600s、打包约 7200s，但只占一次调用，不再卡住整个进程。
+> Windows 交互终端启动时仍会同步查一次代码页（chcp），耗时可以忽略。
 
 > **MCP 并发闸门**：stdio 与 HTTP 的并发工具调用默认上限 **4**（`BDP_MCP_MAX_CONCURRENCY`）。
 > 没设置或不是数字 → 4；设成 0 或负数 → 1。

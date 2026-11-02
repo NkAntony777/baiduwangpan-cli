@@ -45,9 +45,16 @@ const CASES = [
   ["bdp_read", { path: "/x", lines: 0 }, /超出范围/],
   ["bdp_move", { src: 1, dst: "/y" }, /必须是字符串/],
   ["bdp_ls", { path: 42 }, /必须是字符串/],
+  ["bdp_search", { keyword: 123 }, /必须是字符串/],
+  ["bdp_ask", { query: 123 }, /必须是字符串/],
+  ["bdp_gshares", {}, /gid 不能为空/],
+  ["bdp_gls", { gid: "1" }, /fsId 不能为空/],
+  ["bdp_gtree", { gid: 1 }, /必须是字符串/],
+  ["bdp_gdownload", { gid: "1", fsId: "2" }, /显式确认/],
+  ["bdp_gdownload", { gid: "1", fsId: "2", confirm: "true" }, /显式确认/],
 ];
 
-test("参数校验: 15 种非法参数一律报参数错误（-32001），不是服务端错误", async () => {
+test("参数校验: 非法参数一律报参数错误（-32001），不是服务端错误", async () => {
   for (const [name, args, re] of CASES) {
     let err = null;
     try {

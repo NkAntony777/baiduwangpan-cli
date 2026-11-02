@@ -1,7 +1,7 @@
 ---
 name: baiduwangpan
 description: 百度网盘 CLI 操作技能 — 基于 baiduwangpan-cli (bdp) 命令，支持全盘文件浏览/搜索/免下载读取内容/上传下载/群聊文件浏览。当用户要求查看、搜索、读取、上传、下载百度网盘文件，或浏览百度网盘群聊文件时使用。
-version: 1.11.2
+version: 1.11.3
 authors:
   - NkAntony777
 credentials:
@@ -151,12 +151,14 @@ bdp gsearch <gid> <keyword>        # 搜索群文件名（全量遍历，缓存�
     [--any-word] [--exact] [--no-cache] [--verbose] [--json-file <path>]
 bdp gdownload <gid> <fs_id>...     # 直接下载群文件（免转存）
 bdp cache [clear]                  # 查看/清空会话缓存（~/.bdp/cache/，目录30min/分享5min）
+bdp rename <path> <newName> [--yes]# 只改文件名。默认 dry-run，--yes 才执行。目标不能含 /
+bdp doctor                         # 登录态 / 引擎 / 配置 / 索引新鲜度一次报出
 bdp error <code> [--json] [--list] # 解释错误码（结构化：code/codeText/name/description/severity/retryable/action）
 ```
 
 ### MCP：让 Agent 自主整理
 
-MCP 工具从 14 → **19**，补齐了写操作，Agent 不再只能看：
+MCP 工具从 14 → **23**，补齐了写操作和群文件工具，Agent 不再只能看：
 
 | 工具 | 用途 |
 |:-----|:-----|
@@ -204,9 +206,10 @@ bdp serve --mcp        # 启动 MCP 服务器（stdio, JSON-RPC 2.0）
 bdp serve --json       # 查看 MCP 模式信息（不启动）
 ```
 
-暴露 19 个工具：`bdp_ls` / `bdp_search` / `bdp_read` / `bdp_preview` / `bdp_dedup` / `bdp_organize` /
+暴露 23 个工具：`bdp_ls` / `bdp_search` / `bdp_read` / `bdp_preview` / `bdp_dedup` / `bdp_organize` /
 `bdp_ask` / `bdp_peek` / `bdp_quota` / `bdp_error` / `bdp_get` / `bdp_put` / `bdp_mkdir` /
-`bdp_groups` / `bdp_gsearch` / `bdp_move` / `bdp_copy` / `bdp_remove` / `bdp_rename`，
+`bdp_groups` / `bdp_gsearch` / `bdp_gshares` / `bdp_gls` / `bdp_gtree` / `bdp_gdownload` /
+`bdp_move` / `bdp_copy` / `bdp_remove` / `bdp_rename`，
 每个都带强类型 JSON Schema，客户端可自动发现。
 
 ```bash
@@ -377,10 +380,8 @@ bdp organize [path] --by type --apply --yes   # 执行（真实移动网盘文�
     读操作默认 120s、写操作 600s；登录时同步引擎凭证单独限 30s。到点杀掉该子进程，只有这一次调用失败
     （`severity: retryable`）。
 
-    **仍存在的同步子进程**（都不是 BaiduPCS-Go）：`webTransport=curl` 时 Web API 与 Range 读取仍同步 fork curl。
-    另外两条**不看**传输模式：群文件下载（`gdownload`，以及 `get` 的 `gid:fs_id`）始终同步 curl，
-    单文件最长约 3600s、打包最长约 7200s，期间事件循环冻住；预览取文件大小时，异步 HEAD 失败会再同步跑 `curl -I`（native 下也会走到）。
-    默认 native 下，cat / head / tail / grep / peek 的正文读取已是异步 fetch。
+    **curl 也不再冻住事件循环**（v1.11.3）：`webTransport=curl` 的 Web API / Range、群文件下载、预览 HEAD 兜底都是异步 spawn。
+    下载时限仍是单文件约 3600s、打包约 7200s，但只占这一次调用。Windows 交互终端启动时会同步查一次代码页，耗时可以忽略。
 14. **MCP 并发闸门**：stdio 与 HTTP 的并发工具调用默认上限 **4**
     （`BDP_MCP_MAX_CONCURRENCY`；没设置或不是数字 → 4，设成 0 或负数 → 1）。
     口径是**工具调用总数**，不是引擎进程数：dedup / organize / ask 不调引擎，quota 走 BaiduPCS-Go，四者都各占一个槽位。
