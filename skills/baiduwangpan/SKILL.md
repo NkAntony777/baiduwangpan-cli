@@ -1,7 +1,7 @@
 ---
 name: baiduwangpan
 description: 百度网盘 CLI 操作技能 — 基于 baiduwangpan-cli (bdp) 命令，支持全盘文件浏览/搜索/免下载读取内容/上传下载/群聊文件浏览。当用户要求查看、搜索、读取、上传、下载百度网盘文件，或浏览百度网盘群聊文件时使用。
-version: 1.8.2
+version: 1.8.3
 authors:
   - NkAntony777
 credentials:
@@ -154,6 +154,47 @@ bdp cache [clear]                  # 查看/清空会话缓存（~/.bdp/cache/�
 bdp error <code>                   # 查看错误码说明（如 -3 / 2131）
 ```
 
+### MCP：让 Agent 自主整理
+
+MCP 工具从 14 → **18**，补齐了写操作，Agent 不再只能看：
+
+| 工具 | 用途 |
+|:-----|:-----|
+| `bdp_move` | 移动/重命名文件或目录 |
+| `bdp_copy` | 拷贝（整理前备份） |
+| `bdp_remove` | 删除（**必须显式传 `confirm: true`**；走回收站可恢复） |
+| `bdp_rename` | 批量重命名（默认 `dryRun: true` 只预览） |
+| `bdp_organize` | 按类型/年份/来源生成归类方案（只出计划） |
+
+> `bdp_remove` 的 `confirm` 是**故意的摩擦**：让 Agent 不能顺手删用户数据。
+> `bdp_rename` 默认 dry-run，先看再动。
+
+### MCP over HTTP（独立进程 / 远程 agent 接入）
+
+stdio 只能由本机子进程接入。独立运行的 agent（IDE 插件、远程 agent）用 HTTP：
+
+```bash
+# 启动（默认只绑定 127.0.0.1 + 随机令牌）
+bdp serve --mcp --http --port 8765 --token-file ~/.bdp/mcp.token
+
+# 客户端调用
+curl -X POST http://127.0.0.1:8765/mcp \
+  -H "Authorization: Bearer $(cat ~/.bdp/mcp.token)" \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
+```
+
+| 端点 | 说明 |
+|:-----|:-----|
+| `POST /mcp` | JSON-RPC 2.0（MCP HTTP 传输） |
+| `GET /health` | 健康检查，**无需令牌**（探活用） |
+
+> **安全设计**：默认只绑定 `127.0.0.1`（不对外网暴露）；
+> 必须带 `Authorization: Bearer <token>` 或 `?token=`；
+> 令牌默认随机生成（24 字节），`--token-file` 落盘时权限 600；
+> 令牌用常量时间比较（防时序攻击）。
+> 要对外暴露必须显式 `--host 0.0.0.0`，**务必自行加反向代理与 TLS**。
+
 ### MCP 接入（推荐给 Agent 客户端）
 
 ```bash
@@ -161,7 +202,7 @@ bdp serve --mcp        # 启动 MCP 服务器（stdio, JSON-RPC 2.0）
 bdp serve --json       # 查看 MCP 模式信息（不启动）
 ```
 
-暴露 14 个工具：`bdp_ls` / `bdp_search` / `bdp_read` / `bdp_preview` / `bdp_dedup` / `bdp_organize` /
+暴露 18 个工具：`bdp_ls` / `bdp_search` / `bdp_read` / `bdp_preview` / `bdp_dedup` / `bdp_organize` /
 `bdp_ask` / `bdp_peek` / `bdp_quota` / `bdp_get` / `bdp_put` / `bdp_mkdir` /
 `bdp_groups` / `bdp_gsearch`，
 每个都带强类型 JSON Schema，客户端可自动发现。

@@ -23,7 +23,7 @@
 - **📄 免下载读取** — 通过 HTTP Range 直接读取文件内容到 stdout，无需下载整个文件
 - **👥 群聊文件浏览 + 下载** — 逆向 mbox API，列出群组、浏览群内分享库、搜索群文件，并支持**直接下载群文件到本地**（免转存）
 - **🤖 Agent 友好** — 所有命令支持 `--json` 结构化输出，零解析成本
-- **🔌 MCP 接入** — `bdp serve --mcp` 可作为 MCP 服务器运行，工具描述与参数 schema 由客户端自动发现
+- **🔌 MCP 接入** — `bdp serve --mcp` 可作为 MCP 服务器运行（stdio 或 HTTP），工具描述与参数 schema 由客户端自动发现；18 个工具含移动/重命名/删除，Agent 可自主整理
 - **📚 结构化目录/搜索** — `ls` / `search` 的 `--json` 返回真正的结构化 `entries[]`，不再需要解析文本表格
 - **🔤 编码自动识别** — UTF-8 / GBK / Big5 自动判别，中文古籍不再乱码，grep 不再静默漏检
 - **🚦 可信的退出码** — 命令失败一定以非零退出码结束，Agent 不会把失败当成功
@@ -66,7 +66,7 @@
 | 群缓存管理 | `bdp cache [clear]` | 查看 / 清空会话缓存 |
 | 列出我的分享 | `bdp share list` | 网页 API，绕过引擎 panic bug |
 | 错误码释义 | `bdp error -3` | 内置错误码字典 |
-| **MCP 服务器** | `bdp serve --mcp` | stdio 传输，10 个带 schema 的工具 |
+| **MCP 服务器** | `bdp serve --mcp [--http]` | stdio 或 HTTP 传输，18 个带 schema 的工具（含写操作） |
 
 ## 🚀 快速开始
 
@@ -155,7 +155,7 @@ bdp gdownload 539478953581833690 954615608563687 -o ./downloads
 | **mkdir 幂等** | 目录已存在不再报失败 |
 | **gls nextPage** | 补上 SKILL.md 一直引用却不存在的翻页字段 |
 | **error -3 可用** | 负数错误码此前无法执行（`bdp error -- -3` 现在也支持） |
-| **MCP 服务器** | `bdp serve --mcp` 暴露 10 个带 JSON Schema 的工具 |
+| **MCP 服务器** | `bdp serve --mcp [--http]` 暴露 18 个带 JSON Schema 的工具（含移动/重命名/删除，Agent 可自主整理） |
 
 > v1.6.0 及更早版本的行为差异详见 [CHANGELOG.md](CHANGELOG.md)。
 
@@ -433,7 +433,7 @@ baiduwangpan-cli/
 │   ├── name-match.js         # 文件名匹配 (glob/正则/AND/OR)
 │   ├── table.js              # pcstable 表格解析 (CJK 显示宽对齐)
 │   ├── file-type.js          # 二进制文件类型识别 (魔数)
-│   ├── mcp.js                # MCP 服务器 (stdio, JSON-RPC 2.0)
+│   ├── mcp.js                # MCP 服务器 (stdio + HTTP, JSON-RPC 2.0)
 │   └── console.js            # Windows 控制台编码兜底 (chcp 65001)
 ├── test/                     # Node.js 回归测试
 ├── skills/

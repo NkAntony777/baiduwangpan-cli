@@ -195,6 +195,18 @@ function parseArgs(argv) {
       opts.flags.dryRun = true;
     } else if (arg === "--yes" || arg === "-y") {
       opts.flags.yes = true;
+    } else if (arg === "--http") {
+      opts.flags.http = true;
+    } else if (arg === "--port") {
+      opts.flags.port = parseInt(argv[++i], 10) || 0;
+    } else if (arg === "--host") {
+      opts.flags.host = argv[++i];
+    } else if (arg === "--token") {
+      opts.flags.token = argv[++i];
+    } else if (arg === "--token-file") {
+      opts.flags.tokenFile = argv[++i];
+    } else if (arg === "--mcp") {
+      opts.flags.mcp = true;
     } else if (arg === "--by") {
       // --by <type|year|source>：等价于对应的单独开关，可重复使用
       const dim = String(argv[++i] || "").trim().toLowerCase();
@@ -1984,13 +1996,22 @@ const COMMANDS = {
   },
   serve: {
     group: "config",
-    usage: "bdp serve --mcp",
-    desc: "启动 MCP 服务器（stdio 传输，工具可被 Agent 客户端自动发现）",
-    flags: ["mcp"],
+    usage: "bdp serve --mcp [--http [--port N] [--host H] [--token T] [--token-file P]]",
+    desc: "启动 MCP 服务器（stdio 或 HTTP，供 Agent 接入）",
+    flags: ["mcp", "http", "port", "host", "token", "tokenFile"],
+    note: "HTTP 模式默认只绑定 127.0.0.1 并要求 Bearer 令牌；--host 0.0.0.0 才对外暴露（需自行加反向代理）。",
     options: [
-      "--mcp  以 MCP 服务器模式启动",
+      "--mcp             启动 MCP 服务器",
+      "--http            用 HTTP 传输（独立进程/远程 agent 接入）",
+      "--port <N>        监听端口（默认 8765，0=随机）",
+      "--host <H>        监听地址（默认 127.0.0.1，仅本机）",
+      "--token <T>       指定访问令牌（默认随机生成）",
+      "--token-file <P>  把令牌写入文件（权限 600）",
     ],
-    examples: ["bdp serve --mcp"],
+    examples: [
+      "bdp serve --mcp",
+      "bdp serve --mcp --http --port 8765 --token-file ~/.bdp/mcp.token",
+    ],
   },
   help: {
     group: "config",
@@ -2121,18 +2142,59 @@ cmds.help = async (args, json) => {
 // ── MCP 服务器 ─────────────────────────────────────────────
 
 cmds.serve = async (args, json) => {
-  const { startServer, SERVER_NAME, SERVER_VERSION } = require("../lib/mcp");
+  const { startServer, startHttpServer, SERVER_NAME, SERVER_VERSION } = require("../lib/mcp");
+
+  // HTTP 传输：独立进程 / 远程 agent 接入
+  if (args.flags.http) {
+    const host = args.flags.host || "127.0.0.1";
+    const port = parseInt(args.flags.port, 10) || 8765;
+    let token = args.flags.token;
+    const tokenFile = args.flags.tokenFile;
+    if (!token && tokenFile) {
+      try { token = require("fs").readFileSync(tokenFile, "utf-8").trim(); } catch {}
+    }
+    const srv = await startHttpServer({ port, host, token });
+
+    if (tokenFile) {
+      try { require("fs").writeFileSync(tokenFile, srv.token, { encoding: "utf-8", mode: 0o600 }); } catch {}
+    }
+
+    const info = {
+      mode: "mcp",
+      transport: "http",
+      server: SERVER_NAME,
+      version: SERVER_VERSION,
+      url: 'http://' + srv.host + ':' + srv.port + '/mcp',
+      health: 'http://' + srv.host + ':' + srv.port + '/health',
+      token: srv.token,
+      tokenFile: tokenFile || null,
+      tools: require('../lib/mcp').toolDefs().length,
+    };
+
+    if (json || args.flags.jsonFile) {
+      emitJson(info, args);
+    } else {
+      console.log("[bdp serve] MCP HTTP 服务器已启动");
+      console.log("  端点: " + info.url);
+      console.log("  健康: " + info.health);
+      console.log("  令牌: " + info.token);
+      console.log("  用法: curl -X POST " + info.url + " -H 'Authorization: Bearer <token>' -H 'Content-Type: application/json' -d @request.json");
+    }
+
+    await new Promise(() => {});
+    return;
+  }
+
   if (json || args.flags.jsonFile) {
     emitJson({ mode: "mcp", server: SERVER_NAME, version: SERVER_VERSION, transport: "stdio" }, args);
     return;
   }
   if (!args.flags.mcp) {
-    console.error("Usage: bdp serve --mcp   （启动 MCP 服务器，stdio 传输）");
+    console.error("Usage: bdp serve --mcp [--http] [--port N] [--host H] [--token T] [--token-file P]");
     process.exit(1);
   }
   process.stderr.write("[bdp serve] MCP 服务器已启动（stdio, JSON-RPC 2.0）\n");
   startServer();
-  // stdio 服务器常驻，直到 stdin 关闭
   await new Promise(() => {});
 };
 

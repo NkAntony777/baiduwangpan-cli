@@ -207,6 +207,40 @@ bdp organize [path] --by type --apply --yes   # 执行（真实移动网盘文�
 > `--layout` 决定层级顺序（`type-year` / `year-type` / `type-source` / `source-type`）。
 
 
+### serve — MCP 服务器（stdio / HTTP）
+
+```
+bdp serve --mcp                                          # stdio 传输（本地子进程）
+bdp serve --mcp --http --port 8765 --token-file ~/.bdp/mcp.token   # HTTP 传输（独立进程/远程 agent）
+```
+
+**18 个工具**，其中写操作让 Agent 能自主整理：
+
+| 工具 | 用途 | 安全约束 |
+|:-----|:-----|:---------|
+| `bdp_ls` / `bdp_search` / `bdp_read` | 浏览与读取 | 只读 |
+| `bdp_peek` / `bdp_preview` | 元信息与内容预览 | 只读 |
+| `bdp_dedup` | 查重复文件 | 只读（不自动删除） |
+| `bdp_organize` | 生成归类方案 | 只读（只出计划） |
+| `bdp_ask` | 基于本地索引检索正文 | 只读 |
+| `bdp_move` / `bdp_copy` | 移动 / 拷贝 | 写 |
+| `bdp_rename` | 批量重命名 | 写（**默认 dryRun**） |
+| `bdp_remove` | 删除 | 写（**必须 confirm:true**；走回收站可恢复） |
+| `bdp_get` / `bdp_put` / `bdp_mkdir` | 下载 / 上传 / 建目录 | 写 |
+| `bdp_quota` / `bdp_groups` / `bdp_gsearch` | 配额与群聊 | 只读 |
+
+**HTTP 端点**：
+
+| 端点 | 说明 |
+|:-----|:-----|
+| `POST /mcp` | JSON-RPC 2.0（MCP HTTP 传输） |
+| `GET /health` | 健康检查，**无需令牌** |
+
+> **安全设计**：默认只绑定 `127.0.0.1`；必须带 `Authorization: Bearer <token>`；
+> 令牌默认随机生成（24 字节），`--token-file` 落盘权限 600；令牌用常量时间比较。
+> 要对外暴露必须显式 `--host 0.0.0.0`，**务必自行加反向代理与 TLS**。
+
+
 ### dedup — 重复文件扫描
 
 ```
