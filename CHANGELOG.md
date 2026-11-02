@@ -100,7 +100,7 @@ v1.10.1 发布前按任务书 §5 派了四路审核（正确性/回归、信息
 
 ### 📦 分发
 
-- 重新构建 `baiduwangpan-skill.zip`（随 `skills/` 变更同步，38,250 字节 / 8 个文件）。
+- 重新构建 `baiduwangpan-skill.zip`（随 `skills/` 变更同步，38,272 字节 / 8 个文件）。
 
 > **本版本尚未发布到 npm**（npm latest 仍为 1.8.5）。
 > 需要 1.9.x/1.10.x 的功能请从 GitHub tag 安装：
