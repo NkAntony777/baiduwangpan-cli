@@ -195,6 +195,30 @@ function parseArgs(argv) {
       opts.flags.dryRun = true;
     } else if (arg === "--yes" || arg === "-y") {
       opts.flags.yes = true;
+    } else if (arg === "--by") {
+      // --by <type|year|source>：等价于对应的单独开关，可重复使用
+      const dim = String(argv[++i] || "").trim().toLowerCase();
+      if (dim === "type") opts.flags.type = true;
+      else if (dim === "year") opts.flags.year = true;
+      else if (dim === "source") opts.flags.source = true;
+      else {
+        opts.flags.badBy = dim;
+      }
+    } else if (arg === "--type") {
+      opts.flags.type = true;
+    } else if (arg === "--year") {
+      opts.flags.year = true;
+    } else if (arg === "--source") {
+      opts.flags.source = true;
+    } else if (arg === "--target") {
+      opts.flags.target = argv[++i];
+    } else if (arg === "--layout") {
+      opts.flags.layout = argv[++i];
+    } else if (arg === "--apply") {
+      opts.flags.apply = true;
+    } else if (arg === "--set") {
+      opts.flags.set = argv[++i];
+      opts.flags.setValue = argv[++i];
     } else if (arg === "--show-secrets") {
       opts.flags.showSecrets = true;
     } else if (arg === "--profile") {
@@ -332,7 +356,158 @@ function maskSecret(s) {
 
 const SECRET_KEYS = ["bduss", "stoken", "cookie"];
 
+cmds.organize = async (args, json) => {
+  const organizeLib = require('../lib/organize');
+  const dedupLib = require('../lib/dedup');
+  const pcsExtra = require('../lib/pcs-extra');
+
+  const root = args._[0] || '/';
+  const rules = {
+    byType: !!args.flags.type,
+    byYear: !!args.flags.year,
+    bySource: !!args.flags.source,
+    sourceRoot: root,
+    targetRoot: args.flags.target || '/归档',
+    layout: args.flags.layout || 'type-year',
+  };
+
+  if (args.flags.badBy) {
+    const msg = '--by 的取值非法: "' + args.flags.badBy + '"（可选：type | year | source）';
+    if (json || args.flags.jsonFile) emitJson({ error: msg }, args);
+    else console.error('[ERROR] ' + msg);
+    return 1;
+  }
+  if (!rules.byType && !rules.byYear && !rules.bySource) {
+    const msg = '必须至少指定一个归类维度：--by type|year|source';
+    if (json || args.flags.jsonFile) emitJson({ error: msg }, args);
+    else console.error('[ERROR] ' + msg);
+    return 1;
+  }
+
+  verboseLog(args, 'organize ' + root + ' by ' + JSON.stringify(rules));
+
+  const scan = await dedupLib.scanFiles(root, {
+    concurrency: args.flags.concurrency,
+    maxDepth: args.flags.depth,
+    onProgress: args.flags.progress ? (p) => {
+      process.stderr.write('[organize] 已扫描 ' + p.scannedDirs + ' 目录 / ' + p.files + ' 文件\n');
+    } : undefined,
+  });
+
+  const result = organizeLib.buildPlan(scan.files, rules);
+
+  // 执行阶段：--apply + --yes
+  let applied = null;
+  if (args.flags.apply) {
+    if (!args.flags.yes) {
+      const msg = '整理是高危操作，需要显式确认：请加 --yes（或先 --dry-run 看计划）';
+      if (json || args.flags.jsonFile) {
+        emitJson({ error: msg, requiresConfirmation: true, planned: result.plan.length }, args);
+      } else {
+        console.error('[ERROR] ' + msg);
+      }
+      return 1;
+    }
+    const moved = [];
+    const failed = [];
+    for (const item of result.plan) {
+      try {
+        // 目标目录可能不存在，先创建（pan.mkdir 幂等：已存在不算失败）
+        const dstDir = item.to.substring(0, item.to.lastIndexOf('/'));
+        try { pan.mkdir(dstDir); } catch { /* 已存在则忽略 */ }
+        pcsExtra.mv(item.from, item.to);
+        moved.push(item);
+      } catch (e) {
+        failed.push({ from: item.from, to: item.to, error: e.message });
+      }
+    }
+    applied = { attempted: result.plan.length, moved: moved.length, failed: failed.length, errors: failed.slice(0, 10) };
+  }
+
+  const payload = {
+    root,
+    rules: { byType: rules.byType, byYear: rules.byYear, bySource: rules.bySource, targetRoot: rules.targetRoot, layout: rules.layout },
+    scannedFiles: scan.files.length,
+    summary: result.summary,
+    plan: result.plan.slice(0, args.flags.top || 50),
+    planTruncated: result.plan.length > (args.flags.top || 50),
+    skipped: result.skipped.slice(0, 20),
+    applied,
+    elapsedMs: scan.elapsedMs,
+  };
+
+  if (json || args.flags.jsonFile) {
+    emitJson(payload, args);
+    return;
+  }
+
+  console.log('扫描 ' + scan.files.length + ' 个文件，按 ' +
+    [rules.byType && '类型', rules.byYear && '年份', rules.bySource && '来源'].filter(Boolean).join('+') +
+    ' 归类到 ' + rules.targetRoot);
+  console.log('');
+  const cats = Object.entries(result.summary.byCategory).sort((a, b) => b[1].count - a[1].count);
+  if (cats.length) {
+    console.log('=== 归类方案 ===');
+    cats.forEach(([k, v]) => console.log('  ' + String(v.count).padStart(4) + ' 个  ' + k + '   (' + formatSize(v.bytes) + ')'));
+  }
+  if (!result.plan.length) {
+    console.log('\n✅ 无需整理');
+    return;
+  }
+  console.log('');
+  console.log('=== 将移动 ' + result.plan.length + ' 个文件（前 ' + Math.min(result.plan.length, args.flags.top || 50) + ' 个）===');
+  result.plan.slice(0, args.flags.top || 50).forEach((p) => {
+    console.log('  ' + p.from);
+    console.log('    → ' + p.to);
+  });
+  if (payload.planTruncated) console.log('  ... 还有 ' + (result.plan.length - (args.flags.top || 50)) + ' 个未显示');
+  if (applied) {
+    console.log('');
+    console.log('✅ 已移动 ' + applied.moved + ' 个文件' + (applied.failed ? '，' + applied.failed + ' 个失败' : ''));
+    applied.errors.forEach((e) => console.log('   ✗ ' + e.from + ': ' + e.error));
+  } else {
+    console.log('');
+    console.log('提示：加 --apply --yes 执行整理（会真实移动网盘文件）');
+  }
+};
 cmds.config = async (args, json) => {
+  // --set <key> <value>：写入配置（白名单 + 值校验）
+  if (args.flags.set !== undefined) {
+    const key = String(args.flags.set || "").trim();
+    const value = args.flags.setValue !== undefined ? String(args.flags.setValue) : undefined;
+    if (!key || value === undefined) {
+      const msg = "用法: bdp config --set <key> <value>";
+      if (json || args.flags.jsonFile) emitJson({ error: msg }, args);
+      else console.error("[ERROR] " + msg);
+      return 1;
+    }
+    if (config.CONFIG_SECRET_KEYS.includes(key)) {
+      const msg = key + " 属于登录态字段，不能用 --set 修改；请用 bdp login（见 reference/authentication.md）";
+      if (json || args.flags.jsonFile) emitJson({ error: msg }, args);
+      else console.error("[ERROR] " + msg);
+      return 1;
+    }
+    const r = config.setConfig(key, value);
+    if (!r.ok) {
+      if (json || args.flags.jsonFile) emitJson({ error: r.error }, args);
+      else console.error("[ERROR] " + r.error);
+      return 1;
+    }
+    const payload = {
+      updated: key,
+      value: r.value,
+      previous: r.previous === undefined ? null : r.previous,
+      file: config.CONFIG_FILE,
+    };
+    if (json || args.flags.jsonFile) {
+      emitJson(payload, args);
+      return;
+    }
+    console.log("✅ 已设置 " + key + " = " + r.value);
+    console.log("   配置文件: " + config.CONFIG_FILE);
+    return;
+  }
+
   const cfg = config.get();
   const showSecrets = args.flags.showSecrets === true;
   const masked = { ...cfg };
@@ -1413,6 +1588,28 @@ const COMMANDS = {
     flags: [],
     examples: ["bdp ls /", "bdp ls /文档 --json"],
   },
+  organize: {
+    group: "pan",
+    usage: "bdp organize [path] --by type|year|source [--apply --yes]",
+    desc: "内容整理：按类型/年份/来源归类（默认只出计划，不动文件）",
+    flags: ["by", "badBy", "type", "year", "source", "target", "layout", "apply", "yes", "top", "depth", "concurrency", "progress"],
+    note: "默认只出计划。执行需 --apply --yes。整理会真实移动网盘文件（可回退到原位置）。",
+    options: [
+      "--by type       按文件类型（文档/图片/视频/压缩包…）",
+      "--by year       按修改年份",
+      "--by source     按来源目录",
+      "--target <dir>  目标根目录（默认 /归档）",
+      "--layout <order> 层级顺序：type-year|year-type|type-source|source-type",
+      "--top <N>       计划最多显示多少条（默认 50）",
+      "--apply         执行整理（需配合 --yes）",
+      "--yes           确认执行",
+    ],
+    examples: [
+      "bdp organize /med --by type",
+      "bdp organize /med --by type --by year --json",
+      "bdp organize /来自：iPhone --by type --target /归档/手机 --apply --yes",
+    ],
+  },
   dedup: {
     group: "pan",
     usage: "bdp dedup [path] [--remove-duplicates --yes]",
@@ -1763,11 +1960,19 @@ const COMMANDS = {
   },
   config: {
     group: "config",
-    usage: "bdp config [--show-secrets]",
-    desc: "查看配置（凭证默认脱敏）",
-    flags: ["showSecrets"],
-    note: "BDUSS/STOKEN 默认脱敏显示；--show-secrets 才输出原值",
-    examples: ["bdp config", "bdp config --json"],
+    usage: "bdp config [--show-secrets] | bdp config --set <key> <value>",
+    desc: "查看配置 / 设置配置项（凭证默认脱敏）",
+    flags: ["showSecrets", "set", "setValue"],
+    note: "BDUSS/STOKEN 默认脱敏显示；--show-secrets 才输出原值。--set 仅接受白名单键（webTransport/maxBytes/ua/pcsPath），凭证类字段请用 bdp login",
+    options: [
+      "--show-secrets    输出凭证原值（默认脱敏）",
+      "--set <key> <value>  设置配置项（白名单校验）",
+    ],
+    examples: [
+      "bdp config",
+      "bdp config --json",
+      "bdp config --set webTransport native",
+    ],
   },
   profile: {
     group: "config",

@@ -192,3 +192,38 @@ test("no profile configured: get/setAuth behave exactly as before", () => {
   assert.deepEqual(config.load(), { bduss: "new-g", stoken: "new-s", maxBytes: 1024 });
   assert.equal(config.get().bduss, "new-g");
 });
+
+test("config --set: 白名单键可设置并返回 previous", () => {
+  const h = config.setConfig("webTransport", "native");
+  assert.equal(h.ok, true);
+  assert.equal(h.value, "native");
+  assert.equal(config.get().webTransport, "native");
+});
+
+test("config --set: 枚举值非法时报错并列出可选值", () => {
+  const h = config.setConfig("webTransport", "bogus");
+  assert.equal(h.ok, false);
+  assert.match(h.error, /取值非法/);
+  assert.match(h.error, /native/);
+});
+
+test("config --set: 未知键被拒绝并列出可设置项", () => {
+  const h = config.setConfig("evilKey", "1");
+  assert.equal(h.ok, false);
+  assert.match(h.error, /未知配置项/);
+  assert.match(h.error, /webTransport/);
+});
+
+test("config --set: 非整数被拒绝", () => {
+  const h = config.setConfig("maxBytes", "abc");
+  assert.equal(h.ok, false);
+  assert.match(h.error, /整数/);
+});
+
+test("config --set: 凭证类字段不在白名单内", () => {
+  for (const k of ["bduss", "stoken", "cookie"]) {
+    assert.ok(!config.CONFIG_SETTABLE[k], k + " 不应可设置");
+  }
+  assert.ok(config.CONFIG_SECRET_KEYS.includes("bduss"));
+  assert.ok(config.CONFIG_SECRET_KEYS.includes("stoken"));
+});

@@ -186,6 +186,27 @@ bdp preview /中医/2025版药典/内容对比/0101 片剂 对比表.pdf.pdf
 bdp preview /资料.zip --json
 ```
 
+### 内容整理（`bdp organize`）
+
+```bash
+bdp organize [path] --by type|year|source   # 只出计划，不动文件
+bdp organize [path] --by type --by year --target /归档
+bdp organize [path] --by type --apply --yes   # 执行（真实移动网盘文件）
+```
+
+按维度把散落的文件归到分层目录（如 `/归档/文档/2024/报告.pdf`）：
+
+| 维度 | 说明 |
+|:-----|:-----|
+| `--by type` | 文件类型 → 文档/图片/视频/音频/压缩包/代码/数据/安装包/其他 |
+| `--by year` | 修改年份 |
+| `--by source` | 来源目录（把 `/来自：iPhone` 这类目录收拢） |
+
+> **默认只出计划**。执行需 `--apply --yes`（与 `bdp dedup` / `bdp rm` 一致的确认契约）。
+> 同名目标会自动加序号（`report.pdf` → `report (2).pdf`）避免移动冲突。
+> `--layout` 决定层级顺序（`type-year` / `year-type` / `type-source` / `source-type`）。
+
+
 ### dedup — 重复文件扫描
 
 ```
@@ -446,6 +467,7 @@ bdp login --bduss <X> --stoken <Y>   # 保存凭证
 bdp whoami                            # 检查登录状态
 bdp config                            # 查看配置（凭证脱敏）
 bdp config --show-secrets             # 显式输出原值（谨慎使用）
+bdp config --set <key> <value>        # 设置配置项（白名单校验）
 bdp profile list / use <name> / unset   # 多账号 profile
 bdp --profile <name> <命令>            # 全局参数，命令前/后均可
 bdp serve --mcp                       # 启动 MCP 服务器（stdio）
@@ -455,168 +477,27 @@ bdp serve --mcp                       # 启动 MCP 服务器（stdio）
 > （前 10 位 + `...` + 后 4 位，JSON 带 `"redacted": true`）。
 > 仅在用户明确要求时才用 `--show-secrets`。
 
-### serve — MCP 服务器
+### `bdp config --set` 可设置的键
 
-```
-bdp serve --mcp      # 启动 MCP 服务器（stdio, JSON-RPC 2.0, 换行分隔）
-bdp serve --json     # 查看 MCP 模式信息，不启动
-```
+| 键 | 取值 | 说明 |
+|:-----|:-----|:-----|
+| `webTransport` | `curl` \| `native` \| `browser` | Web API 传输模式。`native`（默认）用 Node 内置 fetch，真并发；`curl` 每次 fork curl 进程，同步阻塞 |
+| `maxBytes` | 正整数 | 单次读取的最大字节数 |
+| `ua` | 字符串 | User-Agent（百度 dlink 对 UA 敏感） |
+| `pcsPath` | 路径 | BaiduPCS-Go 引擎路径（失效时自动回退到自动发现） |
 
-暴露 10 个带 JSON Schema 的工具：`bdp_ls` / `bdp_search` / `bdp_read` / `bdp_peek` /
-`bdp_quota` / `bdp_get` / `bdp_put` / `bdp_mkdir` / `bdp_groups` / `bdp_gsearch`。
-工具执行失败时返回 `isError: true` 并附中文错误说明。
-
-返回群组名 + gid。
-
-```bash
-bdp groups
-bdp groups --json
-```
-
-### gshares — 列出群内分享库
-
-```
-bdp gshares <gid> [--no-cache]
-```
-
-返回群内所有分享库（顶层目录）：名称、fs_id、分享者、msg_id。has_more=1 时按 last_msg_time 游标自动翻页。
-- `--no-cache` 跳过 5 分钟会话缓存，强制拉取最新
+> **凭证类字段（`bduss`/`stoken`/`cookie`/`browserProfile`/`browserPort`）不能用 `--set` 修改** ——
+> 它们必须走 `bdp login`，以保证同时更新引擎登录态与配置。
+> 非法取值与未知键都会报错并返回退出码 1。
 
 ```bash
-bdp gshares 539478953581833690
-bdp gshares 539478953581833690 --json
+bdp config --set webTransport native   # 切到真并发模式
+bdp config --set maxBytes 2097152      # 单次读 2MB
+bdp config --set webTransport native --json
 ```
 
-### gls — 浏览分享库内容
-
-```
-bdp gls <gid> <fs_id> [--page <N>] [--page-size <N>] [--from-uk <X>] [--msg-id <Y>] [--parent-fs-id <Z>] [--no-cache]
-```
-
-- 浏览分享库内的文件和子目录
-- `--page-size` 默认 50，最大 100
-- 子目录自动携带 `parentFsId`/`fromUk`/`msgId` 来源信息
-- 若目标 fsId 不是顶层分享且未提供来源，会报错并提示传入 `--from-uk --msg-id`（不再猜测）
-
-```bash
-bdp gls 539478953581833690 742474845517885
-bdp gls 539478953581833690 292608024165826 --from-uk 2642611875 --msg-id 5069931974377329661 --json
-bdp gls 539478953581833690 742474845517885 --page 2 --page-size 50 --json
-```
-
-**errno=-3 处理**：gls 遇到群分享 API 拒绝（errno=-3）时自动依次尝试 page-size 50→20→10；仍失败时：
-- 传入 `--parent-fs-id` → 自动列出父目录，返回 `fallback: {reason:"errno=-3", resolvedFsId: <父目录>, level:"parent"}`
-- 目标为顶层分享 → 退回 gshares 结果，`fallback.level: "group-shares"`
-- Agent 应依据 fallback 从父目录换路径继续遍历
-
-**errno=2131 处理**：msg_id 不属于该群（常见为 gid 与参数来自不同群/分享库）时，工具自动按 fsId 从本群 gshares 解析纠正并重试（结果含 `autoResolved:true`）；无法纠正时返回详细指引（`bdp error 2131`）
-
-### gsearch — 搜索群文件名
-
-```
-bdp gsearch <gid> <keyword> [--page <N>] [--limit <N>] [--depth <N>] [--concurrency <N>] [--max-pages <N>] [--max-requests <N>] [--no-unique] [--all|--all-results] [--timeout <N>] [--save-partial] [--any-word] [--exact] [--no-cache] [--verbose] [--json-file <path>]
-```
-
-- 搜索顶层分享 + 子目录文件名（`--depth N` 递归深度，默认 1）
-- 目录内容自动全页遍历（每页上限 100，`--max-pages` 默认 50），不再漏数据
-- 默认 `--limit 50`，**只取一页**；`hasMore: true` 时用 `--page` 翻页
-- `--max-requests N` 单条命令请求预算（默认 400），防止深扫触发限流
-- 默认启用磁盘会话缓存（目录 30min/分享 5min），重复搜索秒回；`--no-cache` 关闭
-- 默认去重（相同 fsId 不同 msgId 只返回一次）；`--no-unique` 保留全部来源
-- `--concurrency 4` 并发扫描分享目录（1-8），稀疏关键词时提前停止
-- `--all`/`--all-results` 忽略分页获取全部（不作为默认，慢但完整）
-- `--timeout <N>`：到点停止扫描并返回已搜到的部分结果（`timedOut:true, complete:false, partial:true`），避免深扫挂死
-- `--save-partial`：未完整（超时/限流/预算/失败）时自动把已搜到的结果存为 JSON 并打印 `💾 部分结果已保存: <路径>`；配 `--json-file <path>` 写该文件，否则自动生成 `bdp-gsearch-<gid>-<kw>-partial-<时间戳>.json`（当前目录）。保存内容含 `saved:"partial"` + `results`（已搜到的全部匹配）+ 扫描诊断（scannedShares/totalShares/failedShares/stoppedReason/timedOut 等），可直接读取续扫
-- **多关键词**：关键词用空格分隔，默认"全部命中"（AND，可换序）→ `"玄空 飞星"` 只返回同时含"玄空"与"飞星"的名字（精确收窄，解决"玄空"命中 52 个、"玄空飞星"只命中 2 个的问题）；`--any-word` 改"任一命中"（OR）；`--exact` 按文件名精确匹配（忽略路径前缀，大小写不敏感）。单关键词默认仍是子串包含（兼容旧行为）
-- `--json-file <path>` 由 Node 直接写 UTF-8 文件，绕过 PowerShell 编码问题
-
-```bash
-bdp gsearch 539478953581833690 "倪海厦"
-bdp gsearch 539478953581833690 "古籍" --page 2 --limit 20 --json
-bdp gsearch 539478953581833690 "紫微" --no-unique --json
-bdp gsearch 539478953581833690 "资料" --limit 50 --json-file result.json
-```
-
-**JSON 返回结构**：
-```json
-{
-  "results": [ { "name": "...", "path": "...", "isDir": true, "size": 0,
-                 "fsId": "...", "parentFsId": "...", "fromUk": "...", "msgId": "...", "group": "..." } ],
-  "page": 1, "pageSize": 50, "returned": 5,
-  "total": null, "hasMore": true, "nextPage": 2,
-  "unique": true, "complete": false, "partial": false, "throttled": false,
-  "timedOut": false, "stoppedReason": null,
-  "scannedShares": 7, "totalShares": 73, "failedShares": 0, "failedDirs": [],
-  "throttledShares": 0, "cachedDirs": 0, "budgetUsed": 12, "maxPages": 50
-}
-```
-
-- `hasMore`/`nextPage`：翻页依据
-- `complete`：是否完整扫描（提前截断/失败/超时都为 false）；`partial`：结果不完整（`!complete`）；`throttled`：是否因 API 限流中断（重跑命令可续扫，磁盘缓存只补缺失目录）
-- `timedOut`：是否因 `--timeout` 到点停止（返回部分结果）；`stoppedReason`：停止原因（`page-limit`/`budget`/`throttled`/`timeout`/`complete`）
-- `failedDirs`：失败目录明细（fsId/name/errno，最多 50 条）
-- `scannedShares`/`totalShares`/`failedShares`/`throttledShares`/`cachedDirs`/`budgetUsed`：扫描进度元数据
-
-### gdownload — 直接下载群文件（免转存）
-
-```
-bdp gdownload <gid> <fs_id> [fs_id2 ...] [-o <dir>] [--filename <name>] [--from-uk <uk>] [--msg-id <id>] [--no-cache] [--json]
-```
-
-- **用途**：把群聊文件直接下载到本地，**无需转存**（百度已下线群文件转存，`/mbox/msg/transfer` 非空目录一律 `errno=-10`，新版 UI 也移除了"保存"按钮；本命令走逆向的 `/api/sharedownload` 接口，`sign/timestamp` 留空即可）
-- **单 fs_id → 单文件直下**：返回明文 dlink 直接 curl 下载
-- **多 fs_id → zip 打包下载**（`type=batch`，实测可用）：同一分享消息的多个文件打包为 zip（默认名 `bdp-group-<n>files.zip`，`--filename` 可改）
-- fs_id 来源：`gls`/`gsearch` 结果的 `fsId`；子目录文件或单文件分享自动解析 fromUk/msgId（gshares 顶层匹配），解析不到时用 `--from-uk`/`--msg-id` 显式传入（与 gls/gsearch 同源）
-- **只支持文件**：目录 fs_id 会报错并提示先用 gls/gsearch 定位文件
-- 输出：默认当前目录，`-o` 指定目录，`--filename` 指定文件名（默认用网盘文件名）
-- 成功校验：下载字节数与服务端 `size` 一致；dlink 有效期 8h，超时/失败重跑即可
-- **JSON 输出**：`{path, name, size, fsId, fromUk, msgId}`（多文件含 `count`）
-
-**限制**（实测，2026-08）：单文件 ≤ ~20MB 明文；大文件返回加密串（无解）；zip 打包总包 ≤ ~100MB（超限报 `31090 package is too large`）；大文件请用百度网盘官方客户端
-
-```bash
-bdp gdownload 539478953581833690 954615608563687 -o ./downloads --from-uk 1101635869133 --msg-id 713945176566573051
-bdp gdownload 19647465335386550 643585853595305 -o ./apks   # 单文件分享自动解析来源
-bdp gdownload 539478953581833690 527948256537856 986718405708023 -o ./zips   # 多文件 zip 打包
-```
-
-### cache — 会话缓存管理
-
-```
-bdp cache [clear]
-```
-
-- 无参数：显示缓存目录与 TTL（目录 30min / 分享 5min）
-- `cache clear`：清空群聊会话缓存（L1 内存 + L2 磁盘，`~/.bdp/cache/`）
-
-```bash
-bdp cache
-bdp cache clear
-```
-
-### error — 错误码说明
-
-```
-bdp error <code>
-```
-
-> 负数错误码直接作为参数即可（`bdp error -3`）；也支持 `bdp error -- -3`。
-
-```bash
-bdp error -3
-# 群分享 API 拒绝请求。已观察到大目录、错误的 msgId/fromUk、过期分享、请求过于频繁(限流)都可能触发。
-# 处理：减小 --page-size（自动重试 50→20→10）或 --concurrency；限流表现为 errno=0 只返回目录自身，工具自动退避重试
-bdp error 2131
-# msg_id 不属于该群：gid 与 fromUk/msgId 必须同源，工具会自动按 fsId 纠正（autoResolved:true）
-```
-
-## 配置命令
-
-```
-bdp login --bduss <X> --stoken <Y>   # 保存凭证
-bdp whoami                            # 检查登录状态
-bdp config                            # 查看配置
-```
+> **传输模式影响很大**：v1.8.1 起 `native` 才让 `--concurrency` 真正生效
+> （`curl` 模式下并发形同虚设，实测差 20×）。详见下方「性能：并发与传输模式」。
 
 ## 环境变量
 

@@ -1,7 +1,7 @@
 ---
 name: baiduwangpan
 description: 百度网盘 CLI 操作技能 — 基于 baiduwangpan-cli (bdp) 命令，支持全盘文件浏览/搜索/免下载读取内容/上传下载/群聊文件浏览。当用户要求查看、搜索、读取、上传、下载百度网盘文件，或浏览百度网盘群聊文件时使用。
-version: 1.8.1
+version: 1.8.2
 authors:
   - NkAntony777
 credentials:
@@ -161,12 +161,10 @@ bdp serve --mcp        # 启动 MCP 服务器（stdio, JSON-RPC 2.0）
 bdp serve --json       # 查看 MCP 模式信息（不启动）
 ```
 
-暴露 13 个工具：`bdp_ls` / `bdp_search` / `bdp_read` / `bdp_preview` / `bdp_dedup` /
+暴露 14 个工具：`bdp_ls` / `bdp_search` / `bdp_read` / `bdp_preview` / `bdp_dedup` / `bdp_organize` /
 `bdp_ask` / `bdp_peek` / `bdp_quota` / `bdp_get` / `bdp_put` / `bdp_mkdir` /
 `bdp_groups` / `bdp_gsearch`，
 每个都带强类型 JSON Schema，客户端可自动发现。
-
-## 通用选项
 
 ```bash
 --json            # 结构化 JSON 输出（Agent 首选）
@@ -175,6 +173,17 @@ bdp serve --json       # 查看 MCP 模式信息（不启动）
 --verbose         # 进度/日志只写 stderr
 --profile <name>  # 切换账号 profile
 ```
+
+### 切换配置（`bdp config --set`）
+
+```bash
+bdp config --set webTransport native   # Web API 传输模式：native(真并发，默认) | curl | browser
+bdp config --set maxBytes 2097152      # 单次读取字节上限
+```
+
+> 仅接受白名单键（`webTransport` / `maxBytes` / `ua` / `pcsPath`）；
+> 凭证类字段请用 `bdp login`。
+> **传输模式很关键**：`native` 才让 `--concurrency` 真正生效（实测差 20×）。
 
 ## 推荐执行模式
 
@@ -233,6 +242,26 @@ bdp gsearch 539478953581833690 "倪海厦" --limit 20 --json
 - 深扫建议 `--timeout <秒>`：到点返回已搜到的部分结果（`timedOut:true`，不挂死）；`--save-partial` 在未完整时自动把已搜到的结果存为 JSON 并打印路径（配 `--json-file` 写指定文件，否则自动生成 `bdp-gsearch-<gid>-<kw>-partial-<时间戳>.json`），Agent 超时后直接读该文件续扫
 - gsearch JSON 含 `stoppedReason`（page-limit/budget/throttled/timeout/complete）与 `timedOut`，判断结果是否完整以 `complete`/`partial` 为准
 - **多关键词匹配**：关键词用空格分隔，默认"全部命中"（AND，可换序）→ `gsearch "玄空 飞星"` 只返回同时含"玄空"与"飞星"的名字（精确收窄）；`--any-word` 改为"任一命中"（OR，更宽）；`--exact` 按文件名精确匹配（忽略路径前缀）。单关键词默认仍是子串包含（兼容旧行为）
+
+### 内容整理（`bdp organize`）
+
+```bash
+bdp organize [path] --by type|year|source   # 只出计划，不动文件
+bdp organize [path] --by type --by year --target /归档
+bdp organize [path] --by type --apply --yes   # 执行（真实移动网盘文件）
+```
+
+按维度把散落的文件归到分层目录（如 `/归档/文档/2024/报告.pdf`）：
+
+| 维度 | 说明 |
+|:-----|:-----|
+| `--by type` | 文件类型 → 文档/图片/视频/音频/压缩包/代码/数据/安装包/其他 |
+| `--by year` | 修改年份 |
+| `--by source` | 来源目录（把 `/来自：iPhone` 这类目录收拢） |
+
+> **默认只出计划**。执行需 `--apply --yes`（与 `bdp dedup` / `bdp rm` 一致的确认契约）。
+> 同名目标会自动加序号（`report.pdf` → `report (2).pdf`）避免移动冲突。
+> `--layout` 决定层级顺序（`type-year` / `year-type` / `type-source` / `source-type`）。
 
 ### 安全边界（v1.8.0 起，重要）
 

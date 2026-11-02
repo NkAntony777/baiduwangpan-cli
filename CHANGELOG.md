@@ -4,6 +4,88 @@
 
 ---
 
+## v1.8.2 — 2026-11-02
+
+> 主题：补上 `bdp config --set`（此前文档写了这条命令，但实现里并不存在），
+> 并新增 `bdp organize` —— 网盘内容整理。
+
+### 🟢 新增：`bdp config --set <key> <value>`
+
+- 此前 `bdp config` 只能**查看**配置，但 `reference/commands.md` 与 `SKILL.md` 里
+  都写着 `bdp config --set webTransport native` —— **命令并不存在**，属于文档与实现不符。
+  现在补上实现，文档随之变正确。
+- **白名单**：`webTransport` / `maxBytes` / `ua` / `pcsPath`
+- **值校验**：`webTransport` 必须是 `curl`/`native`/`browser`；`maxBytes` 必须是 ≥1024 的整数
+- **凭证类字段（`bduss`/`stoken`/`cookie`/`browserProfile`/`browserPort`）拒绝 `--set`** ——
+  它们必须走 `bdp login`，以保证同时更新引擎登录态与配置
+- 未知键 / 非法值 / 缺值都报错并返回退出码 1；`--json` 模式带 `error` 字段
+- 成功时返回 `{ updated, value, previous, file }`
+
+```bash
+bdp config --set webTransport native
+bdp config --set maxBytes 2097152 --json
+```
+
+### 🟢 新增：`bdp organize` —— 网盘内容整理
+
+把散落的文件按规则归到分层目录（如 `/归档/文档/2024/报告.pdf`）。
+
+| 维度 | 说明 |
+|:-----|:-----|
+| `--by type` | 文件类型 → 文档/图片/视频/音频/压缩包/代码/数据/安装包/其他 |
+| `--by year` | 修改年份 |
+| `--by source` | 来源目录（收拢 `/来自：iPhone` 这类目录） |
+
+- **默认只出计划**，不动任何文件；执行需 `--apply --yes`
+  （与 `bdp dedup` / `bdp rm` 一致的确认契约）
+- `--layout` 决定层级顺序：`type-year` / `year-type` / `type-source` / `source-type`
+- `--target <dir>` 指定目标根目录（默认 `/归档`）
+- **同名目标自动加序号去重**（`report.pdf` → `report (2).pdf`）——
+  不同目录的同名文件归到同一路径时，否则后一个移动会因「目标已存在」而失败
+- 实测（`/med`，160 文件）：正确归类为 7 类（文档 72 / 压缩包 52 / 代码 10 / 其他 10 / 数据 7 / 安装包 5 / 视频 4）
+
+```bash
+bdp organize /med --by type              # 只看计划
+bdp organize /med --by type --by year --json
+bdp organize /来自：iPhone --by type --target /归档/手机 --apply --yes
+```
+
+### 🔌 MCP
+
+新增 `bdp_organize` 工具（只返回计划，不执行移动）——工具数 13 → **14**
+
+### 🧪 测试
+
+225 → **233 全绿**（新增 config --set 的白名单与校验、organize 的归类与冲突去重）
+
+---
+
+
+
+> 主题：补上 `bdp config --set`（此前文档写了这条命令，但实现里并不存在）。
+
+### 🟢 新增：`bdp config --set <key> <value>`
+
+- 此前 `bdp config` 只能**查看**配置，文档却写着 `bdp config --set webTransport native` —— 
+  命令并不存在，属于文档与实现不符。现在补上实现，文档自动变正确。
+- **白名单**：`webTransport` / `maxBytes` / `ua` / `pcsPath`
+- **值校验**：`webTransport` 必须是 `curl`/`native`/`browser`；`maxBytes` 必须是 ≥1024 的整数
+- **凭证类字段（`bduss`/`stoken`/`cookie`/`browserProfile`/`browserPort`）拒绝 `--set`** ——
+  它们必须走 `bdp login`，以保证同时更新引擎登录态与配置
+- 未知键 / 非法值 / 缺值都报错并返回退出码 1，`--json` 模式带 `error` 字段
+- 成功时返回 `{ updated, value, previous, file }`
+
+```bash
+bdp config --set webTransport native
+bdp config --set maxBytes 2097152 --json
+```
+
+### 🧪 测试
+
+225 全绿（新增 config --set 的白名单与校验用例）
+
+---
+
 ## v1.8.1 — 2026-11-02
 
 > 主题：**真正的并发** —— 修复 v1.8.0 里 `--concurrency` 形同虚设的问题。
