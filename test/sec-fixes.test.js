@@ -61,15 +61,19 @@ test("MCP: bdp_rename 正常改名仍然可用，且回报路径 == 实际执行
   assert.deepEqual(mvCalls[0], ["/docs/a.txt", "/docs/b.txt"], "引擎实参与回报必须一致");
 });
 
-test("MCP: bdp_rename 的 from 里的 .. 会被归一化（不能拼到目录外）", async () => {
+test("MCP: bdp_rename 的 from 含 .. 时拒绝（归一化会预览≠执行，见 v1.11.3 审核 4-M2）", async () => {
+  // 这条原先断言「.. 会被归一化」—— 出发点（不能拼到目录外）对，但归一化本身就是缺陷：
+  // /docs/sub/../a.txt 归一后是 /docs/a.txt，可回传的 from 与实际下发的路径**不是同一个字符串**，
+  // 更狠的是 /a/../../etc/passwd 归一成 /etc/passwd —— 用户以为改 A、实际改 B。
+  // 现在含 .. 段一律拒绝，并要求调用方自己传规范化后的绝对路径。
   mvCalls.length = 0;
   const r = await mcp.callTool("bdp_rename", {
     files: [{ from: "/docs/sub/../a.txt", to: "b.txt" }],
     dryRun: false,
   });
-  assert.equal(r.results[0].ok, true);
-  assert.equal(r.results[0].from, "/docs/a.txt", "from 应被归一化");
-  assert.equal(mvCalls[0][0], "/docs/a.txt");
+  assert.equal(r.results[0].ok, false, "含 .. 的 from 应被拒绝");
+  assert.match(r.results[0].error, /\.\./, "错误消息应说明 .. 的问题");
+  assert.equal(mvCalls.length, 0, "不得下发任何 mv");
 });
 
 // A-5：控制字符不能交给引擎

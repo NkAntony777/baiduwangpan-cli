@@ -42,11 +42,67 @@
   `lib/doctor.js`、`lib/rename.js` 根本不在扫描范围，「只要新开一个文件就能绕过全部保证」。
   白名单每条都写明理由（chcp / command -v / taskkill），且白名单文件里用 `spawnSync` 起**引擎**
   仍然算违规。已用探针文件实测：新文件里的 `spawnSync(cfg.pcsPath)` 现在会被抓出来。
-- 测试总数 420 → **434**。
+- 测试总数 414 → **444**（`414` 是上一发布版 v1.11.2 的实际值；此前误写成中途提交的 420）。
+
+### 🔒 输出净化（`raw` 字段 / 人读版 / 错误长度）
+
+- **CLI `--json` 的 `raw` 字段未标记**：引擎原文是**远端可控**的内容（会回显远端文件名 / 错误文本），
+  此前直接交给 Agent，等于让它把「数据」当「指令」。现在与 MCP 侧一致，包上
+  `<untrusted_engine_output>…</untrusted_engine_output>`（深度遍历，只处理名为 `raw` 的字符串字段）。
+- **人读版 `bdp ls` / `bdp get` 直出引擎原文**：远端文件名里的 ESC / OSC 能劫持终端
+  （清屏、改标题、写剪贴板）。现在同样过 `sanitizeControl`（保留 `\t` / `\n` / `\r`）。
+- **CLI 错误消息无长度上限**：实测引擎一大段输出能让 `--json` 的 `error` 达 50KB，
+  一次失败就把 Agent 上下文挤爆；MCP 侧早就有 1000 字符上限，两侧文案因此不一致。
+  新增共享的 `capErrorMessage()`（`lib/sanitize.js`，上限 1000），CLI 与 MCP 用**同一个常量**。
+
+### 🛡️ 四路审核修复（v1.11.3 轮）
+
+> 审核基线 `c0cb1c5`。下面每一条都有实测复现，且多数被**两路以上独立命中**。
+
+- **`bdp rename` 可以重命名网盘根目录**：`from:"/"` 归一化后就是根，`--yes` 时把
+  `mv / /root-new` 直接投给引擎。现在根路径与「归一化后变成根」的写法（`/a/..`）都拒绝。
+- **`from` 含 `..` 会被静默改写成另一个文件**：`/a/../../etc/passwd` 归一成 `/etc/passwd`，
+  用户以为改的是 A、实际改的是 B。现在含 `..` 段一律拒绝（请传规范化后的绝对路径）。
+- **目标名含不可见格式符时「预览 ≠ 执行」**：U+202A-202E / U+2066-206F / U+FEFF 会被
+  `sanitize` 从**回显**里剥掉，但文件真的带着它们落盘 —— Agent 按预览名寻址会指向另一个文件
+  （扩展名伪装）。现在这类字符**拒绝**而不是剥离，`from` 里同样拒绝。
+- **目标名纯空白 / 超长未挡**：`rename /a.txt "   " --yes` 会造出「看不见名字」的文件；
+  超长名（>255）也不拦。现在两侧同口径（`renameFiles` 层挡，CLI 与 MCP 都覆盖）。
+- **`bdp organize --target ../../x` 零校验**：`--apply` 会拿 target 直接 `mkdir` + `mv`，
+  计划项 `to` 就是 `../../x/文档/x.pdf`。现在 MCP 与 CLI 共用同一套归一校验（拒绝 `..`、归一成绝对路径）。
+- **`bdp doctor` 对「PATH 上的引擎」给假阴性**：`checkEngine` 用 `fs.existsSync` 判存在，
+  而 `findPCS()` 的兜底正是一个**裸名** `BaiduPCS-Go` —— 引擎明明能跑却被报「引擎文件不存在」且退出码 1。
+  现在裸名交 `spawn` 判定。
+- **`bdp doctor` 对「配置的引擎已失效」给假阳性且不可见**：`resolvePcsPath` 会静默回退到自动发现，
+  于是「我配的那个引擎坏了」（安全上是**静默引擎替换**）对调用方完全不可见。现在输出
+  `engine.source`（`configured`/`path`/`auto-fallback`），回退时进 `warnings`。
+- **群下载失败只说「下载失败」**：超时（可重试）/ 输出超限（改参数）/ 0 字节（换链接）的处理动作不同，
+  此前一律同一句话。现在消息带原因，口径与 `http.assertCurlOk` 一致。
+- **群下载落盘名未挡 Windows 保留设备名与 ADS 流**：`CON` 会让 `curl -o` 写到控制台、
+  `x.txt:hidden` 是 NTFS 数据流。现在回落到兜底名。
+- **群文件列表页 `page` 未钳制**（`page=-3`/`1e9` 原样拼进 URL），现在与 `pageSize` 同口径。
+- **`spawnCollected` 静默吞掉非法数值**：`timeoutMs:"abc"` → `NaN` → `setTimeout(NaN)` 变成 **1ms**
+  （每次调用都立刻超时，还往 stderr 吐 NaN 警告）；`0` 被 `||` 吞成默认值。现在显式 `Number.isFinite` 归一。
+- **人读通道泄漏本地绝对路径**：`bdp gdownload` / `bdp get <gid>:<fsid>` 的人读输出、
+  `bdp cache info` 的 `cacheDir`、`gdownload --verbose` 的 cwd 此前都直出（`--json` 已脱敏，人读没跟上）。
+  现在统一过 `redactLocalPaths`。
+- **`bdp rename` 人读输出直出远端文件名**（含 ESC 会打到终端），现在过 `sanitizeControl`。
+- **`bdp_rename` 的工具描述与实现矛盾**：schema 写「`to`：新文件名**或完整新路径**」，
+  实现却拒绝含 `/` 的目标 —— 这是 Agent 唯一能读到的权威说明，照着传必然失败，
+  还暗示「可以借改名移动文件」。已改为「仅新文件名」并指向 `bdp_move`；同时删掉不存在的
+  「`->` / `=>` 规则串」描述。
+
+### 📚 文档
+
+- `commands.md` 补 `### rename` 与 `### doctor` 两节（含退出码语义：`doctor` 的 `ok=false` 退 1 不代表崩了）。
+- README 的完整命令参考补 `bdp rename` / `bdp doctor` 两行（此前主入口完全看不到这两个新命令）。
+- SKILL.md「MCP 工具从 14 → 23」改为 **19 → 23**（基线错：v1.11.2 实测就是 19）。
+- v1.11.2 段落的测试数与 zip 体积还原成**该 tag 的真实值**（414 / 38,346）——
+  此前被改写成后面提交的水位（420 / 40,748），使已发布的发布说明与自己的 tag 不自洽。
 
 ### 📦 分发
 
-- 重新构建 `baiduwangpan-skill.zip`（40,759 字节 / 8 个文件）。
+- 重新构建 `baiduwangpan-skill.zip`（40,873 字节 / 8 个文件）。
 - **npm 上仍为 1.10.2**。v1.11.x 都还没发，首次发布将带上这一版。
 
 ---
@@ -81,33 +137,11 @@
 - 新增 `test/mcp-args.test.js`（4 条 / 15 个非法参数用例）：
   参数错误矩阵、`bdp_mkdir {path:123}` **不得触发引擎**、端到端 `error.code === -32001`、
   合法参数（含空格路径）不被误伤。
-- 新增 `test/output-sanitize.test.js`（6 条）：`raw` 字段边界标记（含嵌套/数组、
-    跳过 `__proto__`）、错误消息限长、先净化再限长的顺序、人读版不再直出引擎原文。
-- 测试总数 410 → **420**。
-
-### 🔒 输出净化（`raw` 字段 / 人读版 / 错误长度）
-
-- **CLI `--json` 的 `raw` 字段未标记**：引擎原文是**远端可控**的内容（会回显远端文件名 / 错误文本），
-  此前直接交给 Agent，等于让它把「数据」当「指令」。现在与 MCP 侧一致，包上
-  `<untrusted_engine_output>…</untrusted_engine_output>`（深度遍历，只处理名为 `raw` 的字符串字段）。
-- **人读版 `bdp ls` / `bdp get` 直出引擎原文**：远端文件名里的 ESC / OSC 能劫持终端
-  （清屏、改标题、写剪贴板）。现在同样过 `sanitizeControl`（保留 `\t` / `\n` / `\r`）。
-- **CLI 错误消息无长度上限**：实测引擎一大段输出能让 `--json` 的 `error` 达 50KB，
-  一次失败就把 Agent 上下文挤爆；MCP 侧早就有 1000 字符上限，两侧文案因此不一致。
-  新增共享的 `capErrorMessage()`（`lib/sanitize.js`，上限 1000），CLI 与 MCP 用**同一个常量**。
-
-### 📚 文档
-
-- 文档对拍（按 v1.11.1 之后的实现，不沿用对 `f09d5a1` 的旧结论）：
-  `quota` 走引擎，不是 web API；`bdp config` 的 `pcsPath` / `browserProfile` 始终脱敏成 `<local-path>`；
-  批量部分失败（`rm` / `share cancel` / `organize --apply` / `dedup --remove-duplicates`）退出码为 1，JSON 不一定有顶层 `error`；
-  全局带值选项拒绝以 `-` 开头（不只是 `--`）。
-- `commands.md` 补上 `groups` / `gshares` / `gls` / `gsearch`。
-- MCP 参数口径与 v1.11.2 实现对齐：路径必须是字符串；`bdp_read` 的 `lines` 必须是整数；`confirm` 必须是布尔 `true`。
+- 测试总数 410 → **414**。
 
 ### 📦 分发
 
-- 重新构建 `baiduwangpan-skill.zip`（40,748 字节 / 8 个文件）。
+- 重新构建 `baiduwangpan-skill.zip`（38,346 字节 / 8 个文件）。
 - **npm 上仍为 1.10.2**：`v1.11.0` / `v1.11.1` 是未发布的开发 tag，首次发布将是本版。
 
 ---

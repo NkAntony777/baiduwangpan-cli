@@ -287,6 +287,7 @@ bdp put <local> <remote>         上传文件 [--dry-run]
 bdp mkdir <path>                 创建目录
 bdp rm <path>                    删除文件/目录 [--dry-run]
 bdp mv <src> <dst>               移动/重命名文件/目录
+bdp rename <path> <newName>      只改文件名 (默认 dry-run, --yes 才改名; 不能跨目录)
 bdp cp <src> <dst>               拷贝文件/目录
 bdp quota                        网盘配额 (总/已用/剩余)
 bdp du [path]                   目录容量分析 (递归统计, --depth/--top/--concurrency)
@@ -301,6 +302,7 @@ bdp serve --mcp                 启动 MCP 服务器 (stdio) -- 23 个带 schema
 bdp serve --mcp --http [--port N] [--host H] [--token T]  MCP over HTTP
                               (默认仅绑 127.0.0.1 + Bearer 令牌; /health 免令牌)
 bdp config --set <key> <value>  设置配置项 (白名单: webTransport/maxBytes/ua/pcsPath)
+bdp doctor                       健康检查 (登录/配置/引擎/索引新鲜度; ok=false 时退出码 1)
 bdp help [command]               帮助总览 / 单命令详情 (--json 结构化输出)
 ```
 

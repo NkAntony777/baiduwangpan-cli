@@ -495,12 +495,21 @@ cmds.organize = async (args, json) => {
   const pcsExtra = require('../lib/pcs-extra');
 
   const root = args._[0] || '/';
+  // --target 与 MCP 侧同一套闸门：--apply 会拿它直接 mkdir + mv，
+  // `--target ../../x` 会把文件搬到目录树之外（实测计划项 to 就是 "../../x/文档/x.pdf"）。
+  const targetNorm = require("../lib/rename").normalizeDirArg(args.flags.target === undefined ? '/归档' : args.flags.target, '--target');
+  if (!targetNorm.ok) {
+    const msg = targetNorm.error;
+    if (json || args.flags.jsonFile) emitJson({ error: msg }, args);
+    else console.error('❌ ' + msg);
+    return 1;
+  }
   const rules = {
     byType: !!args.flags.type,
     byYear: !!args.flags.year,
     bySource: !!args.flags.source,
     sourceRoot: root,
-    targetRoot: args.flags.target || '/归档',
+    targetRoot: targetNorm.value,
     layout: args.flags.layout || 'type-year',
   };
 
@@ -720,7 +729,7 @@ cmds.config = async (args, json) => {
     console.log("  pcsPath:   " + d.pcsPath);
     console.log("  ua:        " + d.ua.substring(0, 40) + "...");
     console.log("  maxBytes:  " + d.maxBytes);
-    console.log("  file:      " + config.CONFIG_FILE);
+    console.log("  file:      " + redactLocalPaths(config.CONFIG_FILE));
     if (d.redacted) console.log("  (凭证已脱敏；如需原值加 --show-secrets)");
   });
 };
@@ -1174,11 +1183,14 @@ cmds.rename = async (args, json) => {
   if (json || args.flags.jsonFile) {
     emitJson(r, args);
   } else {
+    // 人读通道也要净化：from/to 是**远端可控**的字符串，
+    // 远端文件名里的 ESC/OSC 能劫持终端（清屏、改标题、写剪贴板）。
+    const show = (s) => sanitizeControl(String(s === undefined || s === null ? "" : s));
     r.results.forEach((item) => {
-      if (!item.ok) console.error("❌ " + (item.from || "") + ": " + item.error);
-      else if (item.dryRun) console.log("[dry-run] " + item.from + " → " + item.to);
-      else if (item.skipped) console.log("ℹ️  名称未变: " + item.from);
-      else console.log("✅ 已重命名: " + item.from + " → " + item.to);
+      if (!item.ok) console.error("❌ " + show(item.from) + ": " + show(item.error));
+      else if (item.dryRun) console.log("[dry-run] " + show(item.from) + " → " + show(item.to));
+      else if (item.skipped) console.log("ℹ️  名称未变: " + show(item.from));
+      else console.log("✅ 已重命名: " + show(item.from) + " → " + show(item.to));
     });
     if (dryRun) console.log("提示：加 --yes 才会真正改名");
   }
@@ -1520,7 +1532,7 @@ cmds.gdownload = async (args, json) => {
   if (args.flags.o) opts.outDir = args.flags.o;
   if (args.flags.filename) opts.filename = args.flags.filename;
 
-  verboseLog(args, `gdownload gid=${gid} fsIds=[${fsIds.join(",")}] outDir=${opts.outDir || process.cwd()} filename=${opts.filename || "auto"} fromUk=${opts.fromUk || "auto"} msgId=${opts.msgId || "auto"}`);
+  verboseLog(args, `gdownload gid=${gid} fsIds=[${fsIds.join(",")}] outDir=${redactLocalPaths(opts.outDir || process.cwd())} filename=${opts.filename || "auto"} fromUk=${opts.fromUk || "auto"} msgId=${opts.msgId || "auto"}`);
 
   // 单文件 → 直接下载；多 fs_id（同一分享消息）→ zip 打包下载（逆向 type=batch）
   const result = fsIds.length === 1
@@ -1530,7 +1542,7 @@ cmds.gdownload = async (args, json) => {
   output(
     { path: redactLocalPaths(result.path), name: result.name, size: result.size, fsId: fsIds.length === 1 ? fsIds[0] : undefined, count: result.count, fromUk: result.fromUk, msgId: result.msgId },
     json,
-    () => console.log(`✅ 已下载 ${result.size} 字节 → ${result.path}${result.count ? `（${result.count} 个文件 zip 打包）` : ""}`)
+    () => console.log(`✅ 已下载 ${result.size} 字节 → ${redactLocalPaths(result.path)}${result.count ? `（${result.count} 个文件 zip 打包）` : ""}`)
   );
 };
 
@@ -1546,7 +1558,7 @@ cmds.cache = async (args, json) => {
   const path = require("path");
   const os = require("os");
   const dir = process.env.BDP_CACHE_DIR || path.join(os.homedir(), ".bdp", "cache");
-  output({ cacheDir: dir, ttl: { dir: "30min", shares: "5min" } }, json, () => {
+  output({ cacheDir: redactLocalPaths(dir), ttl: { dir: "30min", shares: "5min" } }, json, () => {
     console.log(`Cache dir:  ${dir}`);
     console.log(`Dir TTL:    30 min (gsearch/gtree 目录列表)`);
     console.log(`Shares TTL: 5 min (gshares 分享列表)`);

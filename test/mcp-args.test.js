@@ -41,6 +41,7 @@ const CASES = [
   ["bdp_organize", { path: "/", byType: true, layout: "bogus" }, /layout 取值非法/],
   ["bdp_gsearch", {}, /gid 不能为空/],
   ["bdp_gsearch", { gid: "1" }, /keyword 不能为空/],
+  ["bdp_gsearch", { gid: "1", keyword: "a", limit: "50" }, /必须是整数/],
   ["bdp_read", { path: "/x", lines: "abc" }, /必须是整数/],
   ["bdp_read", { path: "/x", lines: 0 }, /超出范围/],
   ["bdp_move", { src: 1, dst: "/y" }, /必须是字符串/],

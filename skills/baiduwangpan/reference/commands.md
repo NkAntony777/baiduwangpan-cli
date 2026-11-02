@@ -499,6 +499,26 @@ bdp mv /文档/a.pdf /文档/b.pdf   # 重命名
 bdp mv /文档/a.pdf /备份/        # 移动到目录
 ```
 
+### rename — 只改文件名（不能跨目录）
+
+```
+bdp rename <path> <newName> [--yes]
+```
+
+```bash
+bdp rename /文档/a.pdf b.pdf          # 预览（默认 dry-run）
+bdp rename /文档/a.pdf b.pdf --yes    # 真正改名
+```
+
+- **默认只预览**，加 `--yes` 才真的改名。
+- `newName` 只能是**文件名**：不能含 `/` 或 `\`，不能是 `.` / `..`，不能是纯空白，
+  不能含控制字符或不可见格式字符（U+202A-202E / U+2066-206F / U+FEFF），且不超过 255 字符。
+- 想跨目录就用 `bdp mv`，这条命令**故意**不提供该能力。
+- 退出码：改名失败（含改名规则被拒绝）为 **1**；dry-run 且规则合法为 0。
+
+MCP 侧同名工具 `bdp_rename`：`files: [{from, to}]`（`to` 同上规则）、`dryRun` 默认 `true`。
+逐条返回 `{from, to, ok, error?}`；**单条失败不中止整批**。
+
 ### cp — 拷贝
 
 ```
@@ -660,6 +680,27 @@ bdp share list
   BaiduPCS-Go v4.0.1 引擎的 `share list` 有 panic bug，网页 API 正常，
   输出含 shareId / 链接 / 提取码 / 过期时间 / 浏览次数，`source` 字段标明来源
 
+### doctor — 一次做完健康检查
+
+```
+bdp doctor [--json]
+```
+
+一次报出四件事：**登录态**、**配置是否可读**、**引擎能否启动**、**索引是否在 7 天内**。
+
+```bash
+bdp doctor
+bdp doctor --json
+```
+
+- **索引过期只警告**，不影响退出码；索引缺失也只进 `warnings`。
+- **退出码语义**：`ok=false`（未登录 / 配置不可读 / 引擎无法启动）→ **1**；否则 0。
+  也就是说 `bdp doctor` 退出 1 **不代表 bdp 崩了**，而是「诊断发现问题」，先看 `warnings`。
+- `engine.source` 说明引擎从哪来：`configured`（配置的）/ `path`（PATH 上的）/
+  `auto-fallback`（**配置的路径已失效，静默回退到自动发现** —— 这时 `warnings` 里会明确写出来，
+  否则「我配的那个引擎坏了」这件事对调用方完全不可见）。
+- 输出**不含**本地绝对路径、pcsPath、索引库路径。
+
 ## 配置命令
 
 ```
@@ -764,7 +805,7 @@ bdp gtree <gid> [--depth N] [--concurrency N] [--max-nodes N] [--max-pages N] [-
 ```
 
 - BFS 逐层构建目录树，默认 depth 2，节点上限 2000
-- 返回 	ree（含 path/fsId/parentFsId/fromUk/msgId）+ ailed + 元数据
+- 返回 `tree`（含 path/fsId/parentFsId/fromUk/msgId）、`failed` 和元数据
 
 ```bash
 bdp gtree 539478953581833690 --depth 2 --json
