@@ -148,6 +148,8 @@ function parseArgs(argv) {
       opts.flags.jsonFile = argv[++i];
     } else if (arg === "--no-meta") {
       opts.flags.noMeta = true;
+    } else if (arg === "--version" || arg === "-v") {
+      opts.flags.version = true;
     } else if (arg === "--verbose") {
       opts.flags.verbose = true;
     } else if (arg === "--unique") {
@@ -374,11 +376,11 @@ cmds.login = async (args, json) => {
     }
 
     if (json) {
-      console.log(JSON.stringify({ success: true, method: "browser-qr", bduss: "***set***", stoken: "***set***" }));
+      console.log(JSON.stringify(withMeta({ success: true, method: "browser-qr", bduss: "***set***", stoken: "***set***" }, jsonCtx), null, 2));
     }
   } catch (e) {
     if (json) {
-      console.log(JSON.stringify({ error: e.message }));
+      console.log(JSON.stringify(withMeta({ error: e.message }, jsonCtx), null, 2));
     } else {
       console.error(`[ERROR] ${e.message}`);
       console.error("        提示: 也可手动方式 bdp login --bduss <值> --stoken <值>");
@@ -764,7 +766,7 @@ cmds.cat = async (args, json) => {
   const text = pan.cat(filePath);
   const safe = sanitizeControl(text);
   if (json) {
-    console.log(JSON.stringify({ path: filePath, content: markUntrusted(safe) }));
+    console.log(JSON.stringify(withMeta({ path: filePath, content: markUntrusted(safe) }, jsonCtx), null, 2));
   } else if (args.flags.number) {
     safe.split("\n").forEach((line, i) => {
       console.log(`${String(i + 1).padStart(6)}  ${line}`);
@@ -780,7 +782,7 @@ cmds.head = async (args, json) => {
   const n = args.flags.n || 20;
   const lines = pan.head(filePath, n).map(sanitizeControl);
   if (json) {
-    console.log(JSON.stringify({ path: filePath, lines: n, content: markUntrusted(lines) }));
+    console.log(JSON.stringify(withMeta({ path: filePath, lines: n, content: markUntrusted(lines) }, jsonCtx), null, 2));
   } else {
     lines.forEach((l) => console.log(l));
   }
@@ -792,7 +794,7 @@ cmds.tail = async (args, json) => {
   const n = args.flags.n || 20;
   const lines = pan.tail(filePath, n).map(sanitizeControl);
   if (json) {
-    console.log(JSON.stringify({ path: filePath, lines: n, content: markUntrusted(lines) }));
+    console.log(JSON.stringify(withMeta({ path: filePath, lines: n, content: markUntrusted(lines) }, jsonCtx), null, 2));
   } else {
     lines.forEach((l) => console.log(l));
   }
@@ -804,11 +806,11 @@ cmds.grep = async (args, json) => {
   if (!pattern || !filePath) { console.error("Usage: bdp grep <pattern> <path>"); process.exit(1); }
   const matches = pan.grep(pattern, filePath, { ignoreCase: args.flags.i });
   if (json) {
-    console.log(JSON.stringify({
+    console.log(JSON.stringify(withMeta({
       path: filePath,
       pattern,
       matches: matches.map((m) => ({ line: m.line, content: markUntrusted(m.content) })),
-    }));
+    }, jsonCtx), null, 2));
   } else {
     matches.forEach((m) => {
       if (args.flags.number) console.log(`${filePath}:${m.line}:${m.content}`);
@@ -2162,6 +2164,7 @@ const GLOBAL_OPTIONS = [
   "--json-file <path>  JSON 写入文件 (UTF-8, 绕开控制台编码)",
   "--legacy-json       输出裸数组 (gls/gsearch legacy)",
   "--verbose           进度/日志只写 stderr",
+  "--no-meta           关闭统一响应信封 (--json 输出不带 meta)",
 ];
 
 // CJK 等宽字符按 2 列计（与 pcs-extra 的显示宽度规则一致）
@@ -2219,7 +2222,7 @@ function buildCommandHelp(name) {
 
 
 // 全局通用选项（所有命令都接受）；命令专属选项见 COMMANDS[name].flags
-const GLOBAL_FLAGS = ['json', 'jsonFile', 'legacyJson', 'verbose', 'profile', 'noMeta'];
+const GLOBAL_FLAGS = ['json', 'jsonFile', 'legacyJson', 'verbose', 'profile', 'noMeta', 'version'];
 
 // 防呆：未知选项直接报错（agent 拼错参数立刻发现，而不是静默忽略）
 function validateFlags(command, flags, cmdMeta) {
@@ -2352,17 +2355,19 @@ async function main() {
     profileName = argv[0].slice("--profile=".length);
     rest = argv.slice(1);
   }
+  // 全局选项也允许放在命令之前（bdp --no-meta ls --json）
+  const preCommandFlags = [];
+  while (rest.length > 0 && rest[0] === "--no-meta") preCommandFlags.push(rest.shift());
+
   const command = rest[0];
-  const args = parseArgs(rest.slice(1));
+  const args = parseArgs(rest.slice(1).concat(preCommandFlags));
   const json = args.flags.json || false;
 
-  // 统一响应信封的上下文（command / profile / 计时起点 / --no-meta 开关）
-  jsonCtx = {
-    command: command || null,
-    profile: profileName !== undefined ? profileName : (args.flags.profile || null),
-    startedAt: Date.now(),
-    noMeta: args.flags.noMeta === true,
-  };
+  // bdp --version：此前版本号只能从 `bdp help --json` 里刨
+  if (command === "--version" || command === "-v" || args.flags.version) {
+    console.log(require("../package.json").version);
+    process.exit(0);
+  }
 
   // 切换账号 profile（须在命令 handler 之前，get()/isLoggedIn() 自动生效）
   const profile = profileName !== undefined ? profileName : args.flags.profile;
@@ -2374,6 +2379,16 @@ async function main() {
       process.exit(1);
     }
   }
+
+  // 统一响应信封的上下文（command / profile / 计时起点 / --no-meta 开关）。
+  // profile 必须是**实际使用的账号**（配置里的 activeProfile），而不是「用户请求的那个」——
+  // 否则多账号用户拿到的信封答不出「这次是哪个账号」。
+  jsonCtx = {
+    command: command || null,
+    profile: (() => { try { return config.getProfile() || null; } catch { return null; } })(),
+    startedAt: Date.now(),
+    noMeta: args.flags.noMeta === true,
+  };
 
   const handler = cmds[command];
   if (!handler) {
@@ -2396,7 +2411,18 @@ async function main() {
     if (typeof rc === "number" && rc !== 0) exitCode = rc;
   } catch (e) {
     if (json) {
-      console.log(JSON.stringify({ error: e.message, ...(e.errno !== undefined ? { errno: e.errno } : {}) }));
+      // 失败路径也要带信封 + 结构化错误码 —— Agent 在最需要诊断的时候不能拿不到这些
+      const errorCodes = require("../lib/error-codes");
+      const hasErrno = e && e.errno !== undefined && e.errno !== null;
+      const info = hasErrno ? errorCodes.describeError(e.errno) : null;
+      emitJson(
+        Object.assign(
+          { error: e && e.message ? e.message : String(e) },
+          hasErrno ? { errno: e.errno } : {},
+          info ? { errorCode: info } : {}
+        ),
+        args
+      );
     } else {
       console.error("[ERROR] " + e.message);
     }

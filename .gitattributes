@@ -1,0 +1,7 @@
+* text=auto eol=lf
+
+# 二进制资源不做换行转换
+*.exe binary
+*.zip binary
+*.png binary
+*.jpg binary

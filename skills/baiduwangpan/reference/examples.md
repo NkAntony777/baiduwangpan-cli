@@ -172,7 +172,9 @@ bdp gsearch <gid> "玄空飞星资料" --exact --json # 文件名精确匹配（
 **错误输出**（所有命令）：
 ```json
 { "error": "错误消息文本" }
+}
 ```
+> 有 errno 时会额外带 `errno` 与结构化的 `errorCode`（`code`/`name`/`severity`/`retryable`/`action`）。
 
 **统一响应信封**（v1.9.0）：所有 `--json` 输出都会追加 `meta`（只追加，不改既有字段）：
 ```json

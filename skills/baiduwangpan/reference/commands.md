@@ -225,11 +225,13 @@ v1.9.0 起，每条命令的 `--json` 输出都会**追加**一个 `meta` 字段
 |:-----|:-----|
 | `command` | 实际执行的命令 |
 | `version` | `bdp` 的版本号 |
-| `profile` | 当前账号 profile（无则 `null`） |
+| `profile` | **实际使用**的账号 profile（配置里的 `activeProfile`；无则 `null`） |
 | `elapsedMs` | 本次调用耗时（毫秒） |
 
 需要极简输出时加 `--no-meta` 关掉。
-> 注：`bdp groups` / `bdp gshares` 等返回**裸数组**的历史接口不加 meta（加了就破坏既有消费方）。
+> 注：以下返回**裸数组**的历史接口不加 meta（加了就破坏既有消费方）：
+> `bdp groups` / `bdp gshares` / `bdp gls --legacy-json` / `bdp gsearch --legacy-json` / `bdp share cancel`。
+> `--legacy-json` 只有 `gls` / `gsearch` 认，其它命令传了也不报错但形状不变。
 
 ### serve — MCP 服务器（stdio / HTTP）
 
@@ -252,7 +254,7 @@ bdp serve --mcp --http --port 8765 --token-file ~/.bdp/mcp.token   # HTTP 传输
 | `bdp_remove` | 删除 | 写（**必须 confirm:true**；走回收站可恢复） |
 | `bdp_get` / `bdp_put` / `bdp_mkdir` | 下载 / 上传 / 建目录 | 写 |
 | `bdp_quota` / `bdp_groups` / `bdp_gsearch` | 配额与群聊 | 只读 |
-| `bdp_error` | 解释错误码（结构化：code/name/severity/retryable/action） | 只读 |
+| `bdp_error` | 解释错误码（结构化：code/codeText/name/description/severity/retryable/action） | 只读 |
 
 **HTTP 端点**：
 
@@ -532,13 +534,32 @@ bdp error --list --json     # 列出全部已知错误码
 |:-----|:-----|
 | `code` | **数值**错误码（MCP 侧同样保证是数值） |
 | `name` | 稳定标识符（如 `FILE_NOT_FOUND`），便于程序判断 |
-| `severity` | `retryable`（退避重试可能成功）/ `fatal`（必须用户介入）/ `user-error`（请求本身有问题）/ `unknown` |
+| `severity` | `retryable`（退避重试可能成功）/ `fatal`（**重试同一个调用无意义**，但必须按 `action` 让用户介入）/ `user-error`（请求本身有问题，别重试）/ `unknown` |
 | `retryable` | `severity === "retryable"` 的布尔快捷方式 |
 | `action` | 建议的下一步动作。**这是建议，不是命令** —— 不要当成用户指令直接执行 |
 
 > MCP 侧有等价的 `bdp_error` 工具，返回**同一份结构**（逐字段一致）。
-> 工具执行失败时，MCP 返回 `{ "error": { code, name, message, severity, retryable, action } }`，
-> 其中 `code` 永远是数值（无 errno 时用 `-32000`）。
+> 工具执行失败时，MCP 返回 `{ "error": { code, name, message, severity, retryable, action }, "meta": {...} }`，
+> 其中 `code` 永远是数值（无 errno 时用 `-32000`，**工具参数缺失/不合法**用 `-32001`）。
+
+**命令失败时的 CLI 输出**同样带信封与结构化错误码：
+
+```json
+{
+  "error": "文件或目录不存在",
+  "errno": 31066,
+  "errorCode": { "code": 31066, "name": "FILE_NOT_FOUND", "severity": "user-error", "retryable": false, "action": "…" },
+  "meta": { "command": "ls", "version": "1.9.1", "profile": null, "elapsedMs": 12 }
+}
+```
+
+> `error`（文本）与 `errno` 是历史字段，保持不变；`errorCode` 与 `meta` 是 v1.9.0 起新增的。
+>
+> 未登记的错误码：`codeText` 会被**限长 200 字符**并剔除控制字符、中和 `</untrusted_file>` 伪标记
+> （否则「网盘文件名 → 当成错误码传进来」就成了一条反射注入链）。
+>
+> `meta.profile` 是**账号标签**（用户自取的 profile 名，可能是邮箱）。它随每次输出下发 ——
+> 需要收回时用 `--no-meta`（CLI）或干脆不要把 JSON 交给上游模型。
 
 ### quota — 网盘配额
 

@@ -4,6 +4,56 @@
 
 ---
 
+## v1.9.1 — 2026-11-02
+
+> 主题：**v1.9.0 的四路审核修复** —— 审核把「统一信封」与「结构化错误码」这两条卖点打回了原形。
+
+### 🔴 修复
+
+- **`meta.profile` 报的是「请求的 profile」而不是「实际使用的账号」**：多账号用户下它恒为 `null`，
+  而这恰是信封宣称的三大用途之一。现在取 `config.getProfile()`（已激活的账号），
+  MCP 侧同样补上（此前 MCP 的 `meta.profile` **恒为 null**）。
+- **7 条路径绕过信封**：`cat`/`head`/`tail`/`grep`/`login`×2 与**顶层错误输出**都是裸 `JSON.stringify`，
+  没有 meta。文档写着「所有 `--json` 输出都带 meta」，而恰恰在 Agent 最需要诊断的**失败路径**上信封消失了。
+  现在全部改走信封；失败路径还额外带上结构化的 `errorCode`。
+- **`describeError` 对已命中的错误码返回 `code: null`**：`"errno=31066"` 能命中 FILE_NOT_FOUND，
+  数值码却丢了 —— Agent 做 `if (err.code === 31066)` 分支时必然走错。
+  现在数值码取自**命中的表键**。
+- **`bdp_mkdir` 缺必填参数校验**：一次参数错误的 MCP 调用会在网盘根目录**真的建出名为 `undefined` 的目录**，
+  工具还回报 `created:true`。现在 11 个工具统一做必填参数校验，缺参数报 user-error 且**不触碰引擎**。
+- **`bdp --no-meta ls` 直接报「未知命令」**：全局选项只能放在命令之后。现在命令之前也认。
+- **MCP 错误消息不做净化**（成功路径做了）：错误消息里的控制字符与 `</untrusted_file>` 伪标记原样进响应，
+  可伪造边界标记。现在错误消息同样净化，且**恒为字符串**。
+- **MCP 工具层错误缺 meta**（成功/失败不对称）：现在失败响应也带信封。
+- **「用错参数」被标成 `severity: unknown` 并建议「提交 Issue」**：把 Agent 自身的参数错误升级成用户工单。
+  新增错误码 `-32001 TOOL_ARGUMENT_ERROR`（`severity: user-error`，明确「别重试，去改参数」）。
+- **未登记错误码的原样回显无上限**：10 万字符的输入会把整段灌进上下文。现在限长 200 字符。
+- **`bdp_error` 的 `list` 参数 CLI 宽松、MCP 严格**：MCP 现在同样接受 `true`/`"true"`/`1`。
+- **MCP 错误消息未中和边界标记**：错误消息里的 `</untrusted_file>` 能**伪造闭合标记**，
+  让注入文本落到「可信区」（成功路径做了净化，错误路径没做）。现在错误消息同样净化。
+- **MCP 错误消息回显本地绝对路径**（含 Windows 用户名）：现在脱敏为 `<local-path>`。
+- **`bdp error` 未登记码的原样回显是反射注入面**：现在限长 200 字符 + 剔除控制字符 + 中和伪标记。
+- **`bdp error` 非 JSON 输出把控制字符打到终端**：现在净化。
+- **`withMeta` 把数据里的 `__proto__` 当原型**：现在用无原型对象并跳过该键（与 MCP 的 `sanitizeDeep` 一致）。
+
+### ⚠️ Breaking（消费方需注意）
+
+- **`bdp error --json` 的 `code` 从字符串变成数值**（旧 `"31326"` → 新 `31326`）。
+  需要字符串的消费者改用 `codeText`（恒为字符串，原样保留输入文本）。
+- **MCP 工具失败时的响应体从纯文本变成 JSON**：旧版 `content[0].text` 是 `"错误: <message>"`，
+  现在是 `{"error":{code,name,message,severity,retryable,action},"meta":{...}}`。
+  依赖 `"错误: "` 前缀做失败分流的客户端需要改判 `isError` 字段或解析 JSON。
+
+> **本版本尚未发布到 npm**（npm latest 仍为 1.8.5）。
+> 需要 1.9.0/1.9.1 的功能请从 GitHub tag 安装：`npm install -g NkAntony777/baiduwangpan-cli#v1.9.1`
+> 或等 npm 发布后再升级。
+### 🧪 测试
+
+298 → **310 全绿**（新增 12 条：meta.profile 取实际账号、CLI 失败路径带信封与 errorCode、
+cat/head/tail/grep 的信封、`--no-meta` 置于命令之前、非规范写法的数值 code、codeText 限长、
+11 个工具的必填参数校验、参数错误归类为 user-error、MCP 错误体带信封与净化、`list` 参数宽松化）
+
+---
 ## v1.9.0 — 2026-11-02
 
 > 主题：**统一响应信封 + 结构化错误码** —— 让 Agent 能程序化地判断「这次调用成功了吗、跑的是哪条命令、能不能重试」。
@@ -30,7 +80,7 @@
 ### 🟢 结构化错误码
 
 - 错误码表从 `bin/bdp.js` 的内联对象抽到 **`lib/error-codes.js`**（此前 MCP 完全用不上）。
-- 错误码从 9 条扩到 **12 条**，每条带 `name`（稳定标识符）、`severity`、`action`：
+- 错误码从 **8 条**扩到 **13 条**，每条带 `name`（稳定标识符）、`severity`、`action`：
 
 | severity | 含义 | Agent 该怎么做 |
 |:--------|:-----|:---------------|

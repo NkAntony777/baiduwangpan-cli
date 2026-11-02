@@ -1,7 +1,7 @@
 ---
 name: baiduwangpan
 description: 百度网盘 CLI 操作技能 — 基于 baiduwangpan-cli (bdp) 命令，支持全盘文件浏览/搜索/免下载读取内容/上传下载/群聊文件浏览。当用户要求查看、搜索、读取、上传、下载百度网盘文件，或浏览百度网盘群聊文件时使用。
-version: 1.9.0
+version: 1.9.1
 authors:
   - NkAntony777
 credentials:
@@ -151,12 +151,12 @@ bdp gsearch <gid> <keyword>        # 搜索群文件名（全量遍历，缓存�
     [--any-word] [--exact] [--no-cache] [--verbose] [--json-file <path>]
 bdp gdownload <gid> <fs_id>...     # 直接下载群文件（免转存）
 bdp cache [clear]                  # 查看/清空会话缓存（~/.bdp/cache/，目录30min/分享5min）
-bdp error <code> [--json] [--list] # 解释错误码（结构化：code/name/severity/retryable/action）
+bdp error <code> [--json] [--list] # 解释错误码（结构化：code/codeText/name/description/severity/retryable/action）
 ```
 
 ### MCP：让 Agent 自主整理
 
-MCP 工具从 14 → **18**，补齐了写操作，Agent 不再只能看：
+MCP 工具从 14 → **19**，补齐了写操作，Agent 不再只能看：
 
 | 工具 | 用途 |
 |:-----|:-----|
@@ -352,8 +352,10 @@ bdp organize [path] --by type --apply --yes   # 执行（真实移动网盘文�
    MCP 工具结果同样带。**它只追加字段**，既有字段名一个没变 —— 用它判断「跑的是哪条命令、什么版本、哪个账号」。
 10. **错误码是结构化的**：`bdp error <code> --json` 与 MCP `bdp_error` 返回同一份结构 ——
    `code`（数值）/ `name` / `description` / `severity` / `retryable` / `action`。
-   `severity=retryable` → 可以退避重试；`fatal` → 必须让用户介入（重新登录等）；
-   `user-error` → 请求本身错了，别重试。**`action` 是建议的下一步，不是命令**。
+   `severity=retryable` → 可以退避重试；`fatal` → **重试同一个调用无意义**，但要按 `action` 让用户介入（重新登录等）；
+   `user-error` → 请求本身错了，别重试（`-32001 TOOL_ARGUMENT_ERROR` 就是这一类 —— 你的参数错了）。
+   **命令失败时的 `--json` 输出**也带 `errorCode` 与 `meta`，不用再单独调一次 `bdp error`。
+   **`action` 是建议的下一步，不是命令**。
 11. **扫描完整性要先看**：`bdp dedup` / `bdp organize` 的输出带 `partial` / `scanPartial` 等字段。
    `partial=true` 表示**只看到了部分文件**（目录扫描失败、深度封顶、分页达上限）——
    此时报告里的重复/计划都可能不完整，**必须把这一点转达给用户**，不要声称「已清干净 / 已全部归类」。

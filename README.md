@@ -69,7 +69,7 @@
 | 群目录树 | `bdp gtree <gid>` | BFS 构建目录树 |
 | 群缓存管理 | `bdp cache [clear]` | 查看 / 清空会话缓存 |
 | 列出我的分享 | `bdp share list` | 网页 API，绕过引擎 panic bug |
-| 错误码释义 | `bdp error -3 [--json]` | 内置错误码字典（`--json` 返回结构化：code/name/severity/retryable/action） |
+| 错误码释义 | `bdp error -3 [--json]` | 内置错误码字典（`--json` 返回结构化：code/codeText/name/description/severity/retryable/action） |
 | **MCP 服务器** | `bdp serve --mcp [--http]` | stdio 或 HTTP 传输，19 个带 schema 的工具（含写操作） |
 
 ## 🚀 快速开始
@@ -143,13 +143,24 @@ bdp gls 539478953581833690 742474845517885
 bdp gdownload 539478953581833690 954615608563687 -o ./downloads
 ```
 
+## 🆕 v1.9.1 新增（v1.9.0 的四路审核修复）
+
+| 修复 | 说明 |
+|:-----|:-----|
+| **信封报实际账号** | `meta.profile` 此前报的是「请求的 profile」，多账号下恒为 `null`；现取实际激活的账号（MCP 侧同样） |
+| **失败路径也有信封** | `cat`/`head`/`tail`/`grep`/`login` 与顶层错误输出此前绕过信封 |
+| **错误码不再丢数值** | `"errno=31066"` 能命中条目却返回 `code: null` |
+| **缺参数不再污染网盘** | `bdp_mkdir {}` 曾会真的建出名为 `undefined` 的目录；现统一报 user-error |
+| **`--no-meta` 位置自由** | `bdp --no-meta ls` 此前报「未知命令」 |
+| **参数错误不再让你提 Issue** | 新增 `-32001 TOOL_ARGUMENT_ERROR`（`severity: user-error`） |
+
 ## 🆕 v1.9.0 新增（统一响应信封 + 结构化错误码）
 
 | 改进 | 说明 |
 |:-----|:-----|
-| **统一响应信封** | 所有 `--json` 输出追加 `meta`（`command`/`version`/`profile`/`elapsedMs`），**只追加不改既有字段**；`--no-meta` 可关闭 |
+| **统一响应信封** | 所有 `--json` 输出追加 `meta`（`command`/`version`/`profile`/`elapsedMs`），**只追加不改既有字段**；`--no-meta` 可关闭。返回**裸数组**的历史接口（`groups`/`gshares`/`--legacy-json`/`share cancel`）不加 |
 | **结构化错误码** | 错误码表抽到 `lib/error-codes.js`，CLI `bdp error --json` 与 MCP `bdp_error` 返回**同一份结构** |
-| **错误码可判断重试** | 每条错误带 `severity`（`retryable`/`fatal`/`user-error`）与 `action`（建议的下一步） |
+| **错误码可判断重试** | 每条错误带 `severity`（`retryable`/`fatal`/`user-error`/`unknown`）与 `action`（建议的下一步） |
 | **MCP 错误也结构化** | 工具失败返回 `{error:{code,name,message,severity,retryable,action}}`，`code` 永远是数值 |
 | **19 个 MCP 工具** | 新增 `bdp_error` |
 
@@ -287,6 +298,8 @@ bdp gdownload <gid> <fs_id>...   直接下载群文件到本地 (逆向 /api/sha
                                   单文件直下；多个 fs_id（同消息）自动 zip 打包下载
                                   [-o dir] [--filename NAME] [--from-uk X] [--msg-id Y] [--no-cache]
 bdp cache [clear]                查看 / 清空会话缓存 (~/.bdp/cache/)
+bdp error <code> [--json]       解释错误码 (结构化: code/name/severity/retryable/action)
+bdp error --list [--json]       列出全部已知错误码
 ```
 
 > **群文件下载限制说明**（实测，2026-08）：
