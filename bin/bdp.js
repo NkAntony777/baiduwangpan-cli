@@ -397,6 +397,12 @@ cmds.organize = async (args, json) => {
     else console.error('[ERROR] ' + msg);
     return 1;
   }
+  if (args.flags.layout && !organizeLib.LAYOUTS.includes(args.flags.layout)) {
+    const msg = '--layout 的取值非法: "' + args.flags.layout + '"（可选：' + organizeLib.LAYOUTS.join(' | ') + '）';
+    if (json || args.flags.jsonFile) emitJson({ error: msg }, args);
+    else console.error('[ERROR] ' + msg);
+    return 1;
+  }
   if (!rules.byType && !rules.byYear && !rules.bySource) {
     const msg = '必须至少指定一个归类维度：--by type|year|source';
     if (json || args.flags.jsonFile) emitJson({ error: msg }, args);
@@ -448,6 +454,13 @@ cmds.organize = async (args, json) => {
     root,
     rules: { byType: rules.byType, byYear: rules.byYear, bySource: rules.bySource, targetRoot: rules.targetRoot, layout: rules.layout },
     scannedFiles: scan.files.length,
+    // 扫描完整性：缺了这几个字段，扫描失败/截断时用户会以为计划覆盖了全部文件
+    scanPartial: scan.partial,
+    scanPagedOut: scan.pagedOut,
+    scanDepthCapped: scan.depthCapped,
+    scanFailed: scan.failed,
+    scanFailedDirs: (scan.failedDirs || []).slice(0, 20),
+    scanDepthLimit: scan.depthLimit,
     summary: result.summary,
     plan: result.plan.slice(0, args.flags.top || 50),
     planTruncated: result.plan.length > (args.flags.top || 50),
@@ -464,6 +477,15 @@ cmds.organize = async (args, json) => {
   console.log('扫描 ' + scan.files.length + ' 个文件，按 ' +
     [rules.byType && '类型', rules.byYear && '年份', rules.bySource && '来源'].filter(Boolean).join('+') +
     ' 归类到 ' + rules.targetRoot);
+  if (scan.partial) {
+    const reasons = [
+      scan.depthCapped && '深度封顶（上限 ' + scan.depthLimit + '）',
+      scan.pagedOut && '目录分页达上限',
+      scan.failed > 0 && (scan.failed + ' 个目录扫描失败'),
+      scan.badEntries > 0 && '有畸形条目',
+    ].filter(Boolean);
+    console.log('⚠️ 扫描不完整：' + reasons.join('、') + ' —— 计划只覆盖已扫到的文件');
+  }
   console.log('');
   const cats = Object.entries(result.summary.byCategory).sort((a, b) => b[1].count - a[1].count);
   if (cats.length) {
@@ -525,6 +547,7 @@ cmds.config = async (args, json) => {
       updated: key,
       value: r.value,
       previous: r.previous === undefined ? null : r.previous,
+      scope: r.scope || 'global',
       file: config.CONFIG_FILE,
     };
     if (json || args.flags.jsonFile) {
@@ -1655,7 +1678,7 @@ const COMMANDS = {
       "--by year       按修改年份",
       "--by source     按来源目录",
       "--target <dir>  目标根目录（默认 /归档）",
-      "--layout <order> 层级顺序：type-year|year-type|type-source|source-type",
+      "--layout <order> 层级顺序：type-year|year-type|type-source|source-type|year-source|source-year",
       "--top <N>       计划最多显示多少条（默认 50）",
       "--apply         执行整理（需配合 --yes）",
       "--yes           确认执行",

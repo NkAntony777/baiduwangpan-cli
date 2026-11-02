@@ -156,6 +156,9 @@ bdp gdownload 539478953581833690 954615608563687 -o ./downloads
 | **offline --path 生效** | `bdp offline add --path <dir>` 的保存目录此前被静默丢弃 |
 | **体积上限按字节** | MCP HTTP 请求体 8MB 上限此前按 UTF-16 码元计，中文可放大 3 倍；超限现在真正返回 413 |
 | **recycle clean 要 --yes** | 与 `bdp rm` 一致的确认闸门 |
+| **扫描完整性自报** | `dedup`/`organize` 的输出带 `partial`/`scanPartial`/`scanFailedDirs`；此前目录扫描失败时那批文件会静默消失 |
+| **请求不再无限挂起** | native 传输此前没有超时且 worker 忙等，一次挂起即 100% CPU 死循环。现所有请求带超时，worker 改为事件唤醒 |
+| **MCP/CLI 深度对齐** | MCP `bdp_organize` 此前硬编码深度 6（CLI 是 12），同一目录少覆盖 41% 的文件 |
 
 > Node 版本要求已从 `>=14` 提升到 **>=22.5**（`bdp index` / `bdp ask` 依赖内置 `node:sqlite`）。
 

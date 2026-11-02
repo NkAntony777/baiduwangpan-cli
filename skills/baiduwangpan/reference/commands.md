@@ -204,7 +204,13 @@ bdp organize [path] --by type --apply --yes   # 执行（真实移动网盘文�
 
 > **默认只出计划**。执行需 `--apply --yes`（与 `bdp dedup` / `bdp rm` 一致的确认契约）。
 > 同名目标会自动加序号（`report.pdf` → `report (2).pdf`）避免移动冲突。
-> `--layout` 决定层级顺序（`type-year` / `year-type` / `type-source` / `source-type`）。
+> `--layout` 决定层级顺序，取值：`type-year` / `year-type` / `type-source` / `source-type` /
+> `year-source` / `source-year`。**非法值会报错退出**（不会静默兜底）。
+
+**扫描完整性**（v1.8.4）：CLI / `--json` / MCP 三处输出都带
+`scanPartial` / `scanPagedOut` / `scanDepthCapped` / `scanFailed` / `scanFailedDirs` / `scanDepthLimit`。
+`scanPartial=true` 表示**计划只覆盖了已扫到的文件** —— 目录扫描失败、深度封顶、分页达上限都会触发，
+此时不要把计划当成全量。`summary.targetExists` / `warnings` 会告诉你有多少目标在网盘上已存在（已自动改名）。
 
 
 ### serve — MCP 服务器（stdio / HTTP）
@@ -289,8 +295,10 @@ bdp dedup /med --remove-duplicates --dry-run
 > 删除前先 `--dry-run` 看完整清单。
 
 **扫描完整性**：命令会如实报告扫描是否完整 ——
-`partial=true` 表示扫描不完整（目录分页达上限 / 有畸形条目），
+`partial=true` 表示扫描不完整（目录分页达上限 / 有畸形条目 / **有目录扫描失败**），
 此时结果可能漏报重复文件。`noMd5` 表示有多少文件百度没返回 md5（无法参与精算）。
+v1.8.4 起：`partial` 会把「目录扫描失败」也算进去（此前失败目录里的文件会静默消失），
+并在 `failedDirs` 里列出失败的目录路径。
 
 ### 性能：并发与传输模式
 

@@ -39,6 +39,36 @@
   「删除可恢复」的恢复路径对文件失效。现在放宽为 32 位 `[0-9a-zA-Z]`，并对 md5 反混淆。
 - **`bdp preview` 的 PDF 页数上限 CLI 是 50、MCP 是 200**：CLI 侧改为默认 200（与 MCP 一致）。
 
+### 🔴 扫描可信度（证伪审核发现的第二组高危）
+
+这组缺陷的共同点是「**工具不知道自己看到的不是全部**」—— 去重报告、整理计划都可能少覆盖，
+而界面上没有任何提示。
+
+- **目录扫描失败 → 该目录文件静默消失，`partial` 仍为 false**：`lib/dedup.js` 的 `partial` 表达式漏了 `failed`。
+  实测同一目录连跑三次，其中一轮少 10 个真实文件而 `partial` 没有反映失败。
+  现在 `partial` 计入 `failed`，并在所有输出里带出 `failedDirs`。
+- **native 传输无请求超时 + worker 忙等 → 一次挂起即 100% CPU 死循环**：
+  curl 版有 `--max-time 30`，切到 native 后没有等价超时；而 worker 等其它 worker 时用 `setImmediate` 空转，
+  实测 3 秒墙钟烧掉 3.05 秒 CPU 且扫描永不返回。
+  现在所有 fetch 都带 `AbortSignal.timeout()`（可用 `BDP_REQUEST_TIMEOUT_MS` 调整），
+  worker 等待改为事件唤醒 + 50ms 兜底轮询。
+- **`organize` 全链路不报告扫描不完整**：CLI / JSON / MCP 三处 payload 现在都带
+  `scanPartial` / `scanPagedOut` / `scanDepthCapped` / `scanFailed` / `scanFailedDirs` / `scanDepthLimit`，
+  人类可读输出会在扫描不完整时给出告警。
+- **MCP `bdp_organize` 深度硬编码 6，与 CLI 的 12 差 41% 文件**：同一目录 MCP 只看到 8326 个文件、
+  CLI 看到 14054 个，且因为不报 `partial`，调用方完全不知情。现在深度与 CLI 对齐并可由 `depth` 参数指定。
+- **`config --set` 在激活 profile 时是静默空操作**：`webTransport` 属于 profile 可覆盖字段，
+  但 `setConfig` 只写全局 —— 命令报成功、值纹丝不动。现在这类键会写进当前 profile。
+- **整理计划不检测「目标在网盘上已存在」**：计划直接指向那个已存在的文件，用户要到 `--apply` 之后才知道。
+  现在被跳过的文件会为其原路径占位，目标冲突自动改名，并在 `summary.targetExists` / `warnings` 里报出。
+- **`--layout` 非法值静默接受**：同一命令里 `--by` 是校验的，`--layout` 却静默兜底。
+  现在 CLI 与 MCP 都校验，MCP schema 补齐 6 种布局。
+- **分类与年份边界**：扩展名去尾部空格（`报告.pdf ` 现在正确归入「文档」）；
+  负数 mtime 不再落进 1970 目录。
+- **前缀匹配无分隔符校验**：`/medsub/x` 曾被当成 `/med` 的子目录。现在越界条目直接丢弃并计为畸形。
+- **同名去重不再产生叠名**：原名就叫 `report (2).pdf` 的文件曾被改成 `report (2) (2).pdf`；
+  现在所有自然目标都保留给它的主人，生成的变体名不会占用别人的名字，且结果与输入顺序无关。
+
 ### 📖 文档
 
 - `bdp grep -n` 会被判为「不支持选项」（`-n` 是 head/tail 的行数选项）→ 文档改为只用 `-N`。
@@ -53,8 +83,9 @@
 
 ### 🧪 测试
 
-238 → **253 全绿**（新增 15 条：sanitize 净化与边界标记、config 白名单/值校验/损坏保护/原子写、
-MCP rename 边界与输出标记、HTTP 字节级体积上限、CLI 的 recycle clean 闸门与 offline --path 透传）
+238 → **263 全绿**（新增 25 条：sanitize 净化与边界标记、config 白名单/值校验/损坏保护/原子写/写 profile、
+MCP rename 边界与输出标记、HTTP 字节级体积上限与请求超时、CLI 的 recycle clean 闸门与 offline --path 透传、
+扫描失败计入 partial 与越界路径丢弃、organize 目标占位与叠名修复、layout 校验）
 
 ---
 
