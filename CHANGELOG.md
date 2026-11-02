@@ -35,6 +35,24 @@
 - `skills/baiduwangpan/README.md` 仍写「10 个带 schema 的工具」→ 改为 18 个。
 - `examples.md` 的 `ls` 示例：`mtime` 实为**毫秒**，`totalText` 实为**体积**（不是文件计数）。
 
+### ⚡ 性能（按性能剖析报告落地）
+
+- **`/api/list` 分页大小 100 → 500**（`lib/http.js` 集中定义 `API_LIST_PAGE_SIZE`）：
+  实测服务端**不限制** num（200/500/1000 均 errno=0），且延迟随实际返回条数走而非随 num 走。
+  典型网盘 75~89% 的目录 ≤20 条目 → 请求数 −2.5%~−5.7%；病理大目录 −75%。
+  ⚠️ `page` 与 `num` 耦合（偏移 =(page−1)×num），因此**请求 num 与「翻页结束」判断必须同值**，
+  三处（pan/dedup/preview）各自用本地常量绑定，避免静默跳条目。
+- **修掉 `preview` 只查父目录第 1 页的缺陷**：文件排在第 100 条之后时找不到 →
+  静默回落到阻塞的引擎 `locate`（表现为「大目录里的文件预览悄悄慢 10 倍」）。现在翻页查找。
+- **MCP HTTP 并发闸门**（默认 4，`BDP_MCP_MAX_CONCURRENCY` 可调）：避免突发并发把百度 API 打爆触发风控。
+- **MCP HTTP 改用紧凑 JSON**（stdio 仍为 pretty）：工具结果载荷实测 −36%。
+- **index-store 预编译语句只编译一次**（原来每行 `db.prepare()` 四次）：实测 0.626 → 0.564 ms/行。
+- **worker 兜底定时器可取消 + unref**：扫描结束后不再有悬挂定时器拖住进程退出。
+
+> 更大的架构级优化（把 `ls`/`search`/`locate` 从同步引擎迁到异步 web API，
+> 可让 MCP 并发从「实测 0.85 倍（比串行还差）」恢复到 ~7 倍）涉及 sizeText 语义与 errno 判定，
+> 风险较高，留到 v1.9.0 单独立项。
+
 ### 🧪 测试
 
 263 → **270 全绿**（新增 7 条：POST method/body 透传、UTF-8 尾部截断编码判定、GBK 不被误裁、markUntrusted、目录 dry-run 不落盘）
