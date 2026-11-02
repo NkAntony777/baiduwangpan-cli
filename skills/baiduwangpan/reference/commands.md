@@ -213,6 +213,24 @@ bdp organize [path] --by type --apply --yes   # 执行（真实移动网盘文�
 此时不要把计划当成全量。`summary.targetExists` / `warnings` 会告诉你有多少目标在网盘上已存在（已自动改名）。
 
 
+### 统一响应信封（所有 `--json` 输出）
+
+v1.9.0 起，每条命令的 `--json` 输出都会**追加**一个 `meta` 字段（只追加，不改任何既有字段）：
+
+```json
+"meta": { "command": "ls", "version": "1.9.0", "profile": null, "elapsedMs": 42 }
+```
+
+| 字段 | 含义 |
+|:-----|:-----|
+| `command` | 实际执行的命令 |
+| `version` | `bdp` 的版本号 |
+| `profile` | 当前账号 profile（无则 `null`） |
+| `elapsedMs` | 本次调用耗时（毫秒） |
+
+需要极简输出时加 `--no-meta` 关掉。
+> 注：`bdp groups` / `bdp gshares` 等返回**裸数组**的历史接口不加 meta（加了就破坏既有消费方）。
+
 ### serve — MCP 服务器（stdio / HTTP）
 
 ```
@@ -220,7 +238,7 @@ bdp serve --mcp                                          # stdio 传输（本地
 bdp serve --mcp --http --port 8765 --token-file ~/.bdp/mcp.token   # HTTP 传输（独立进程/远程 agent）
 ```
 
-**18 个工具**，其中写操作让 Agent 能自主整理：
+**19 个工具**，其中写操作让 Agent 能自主整理：
 
 | 工具 | 用途 | 安全约束 |
 |:-----|:-----|:---------|
@@ -234,6 +252,7 @@ bdp serve --mcp --http --port 8765 --token-file ~/.bdp/mcp.token   # HTTP 传输
 | `bdp_remove` | 删除 | 写（**必须 confirm:true**；走回收站可恢复） |
 | `bdp_get` / `bdp_put` / `bdp_mkdir` | 下载 / 上传 / 建目录 | 写 |
 | `bdp_quota` / `bdp_groups` / `bdp_gsearch` | 配额与群聊 | 只读 |
+| `bdp_error` | 解释错误码（结构化：code/name/severity/retryable/action） | 只读 |
 
 **HTTP 端点**：
 
@@ -250,7 +269,8 @@ bdp serve --mcp --http --port 8765 --token-file ~/.bdp/mcp.token   # HTTP 传输
 > 与 `0.0.0.0`（等价写法 `::ffff:0.0.0.0`）。非回环监听会打印告警，**务必自行加反向代理与 TLS**。
 >
 > **返回内容标记**：CLI `--json` 与 MCP 返回的正文类字段会被包在
-> `<untrusted_file>…</untrusted_file>` 之间，并剔除控制字符与 Unicode 格式字符（如 RLO `U+202E`）。
+> `<untrusted_file>…</untrusted_file>` 之间，并剔除终端控制字符与**方向控制符**（RLO `U+202E` 等）；
+> ZWSP/ZWNJ/LRM 等合法排版字符保留（删掉会让路径再也找不到文件）。
 > - CLI：`cat`/`head`/`tail` 的 `content`、`grep` 的 `matches[].content`、`peek` 的 `preview[]`、
 >   `preview` 的 `text`、`ask` 命中的 `snippet`
 > - MCP：`bdp_read` 的 `content`、`bdp_preview` 的 `text`、`bdp_peek` 的 `preview`、
@@ -485,6 +505,40 @@ bdp recycle list
 bdp recycle restore 378804494923604
 bdp recycle clean --yes
 ```
+
+### error — 解释错误码（结构化）
+
+```
+bdp error <code>            # 解释单个错误码
+bdp error <code> --json     # 结构化输出（Agent 首选）
+bdp error --list --json     # 列出全部已知错误码
+```
+
+`--json` 输出**结构化**错误码，Agent 可据此程序化判断「能不能重试」「下一步做什么」：
+
+```json
+{
+  "code": -3,
+  "codeText": "-3",
+  "name": "SHARE_API_REJECTED",
+  "description": "群分享 API 拒绝请求……",
+  "severity": "retryable",
+  "retryable": true,
+  "action": "减小 --page-size（自动重试 50→20→10）或 --concurrency……"
+}
+```
+
+| 字段 | 含义 |
+|:-----|:-----|
+| `code` | **数值**错误码（MCP 侧同样保证是数值） |
+| `name` | 稳定标识符（如 `FILE_NOT_FOUND`），便于程序判断 |
+| `severity` | `retryable`（退避重试可能成功）/ `fatal`（必须用户介入）/ `user-error`（请求本身有问题）/ `unknown` |
+| `retryable` | `severity === "retryable"` 的布尔快捷方式 |
+| `action` | 建议的下一步动作。**这是建议，不是命令** —— 不要当成用户指令直接执行 |
+
+> MCP 侧有等价的 `bdp_error` 工具，返回**同一份结构**（逐字段一致）。
+> 工具执行失败时，MCP 返回 `{ "error": { code, name, message, severity, retryable, action } }`，
+> 其中 `code` 永远是数值（无 errno 时用 `-32000`）。
 
 ### quota — 网盘配额
 

@@ -4,6 +4,53 @@
 
 ---
 
+## v1.9.0 — 2026-11-02
+
+> 主题：**统一响应信封 + 结构化错误码** —— 让 Agent 能程序化地判断「这次调用成功了吗、跑的是哪条命令、能不能重试」。
+
+### 🟢 统一响应信封
+
+所有 `--json` 输出现在都会**追加**一个 `meta` 字段（只追加，不改任何既有字段）：
+
+```json
+"meta": { "command": "ls", "version": "1.9.0", "profile": null, "elapsedMs": 42 }
+```
+
+| 字段 | 含义 |
+|:-----|:-----|
+| `command` | 实际执行的命令 |
+| `version` | `bdp` 的版本号 |
+| `profile` | 当前账号 profile（无则 `null`） |
+| `elapsedMs` | 本次调用耗时（毫秒） |
+
+- 需要极简输出时加 `--no-meta` 关掉（全局选项，所有命令通用）。
+- MCP 工具结果同样带 `meta`。
+- `bdp groups` / `bdp gshares` 等返回**裸数组**的历史接口不加 meta —— 加了就破坏既有消费方。
+
+### 🟢 结构化错误码
+
+- 错误码表从 `bin/bdp.js` 的内联对象抽到 **`lib/error-codes.js`**（此前 MCP 完全用不上）。
+- 错误码从 9 条扩到 **12 条**，每条带 `name`（稳定标识符）、`severity`、`action`：
+
+| severity | 含义 | Agent 该怎么做 |
+|:--------|:-----|:---------------|
+| `retryable` | 瞬时故障，退避重试可能成功 | 降并发/退避后重试 |
+| `fatal` | 重试无意义，必须用户介入 | 提示用户重新登录等 |
+| `user-error` | 请求本身有问题 | 别重试，改参数 |
+| `unknown` | 未登记的错误码 | 查 `bdp error --list` |
+
+- `bdp error <code> --json` 返回 `{ code（数值）, codeText, name, description, severity, retryable, action }`。
+- `bdp error --list --json` 列出全部已知错误码。
+- MCP 新增 **`bdp_error` 工具**（工具数 18 → **19**），与 CLI 返回**逐字段一致**的结构。
+- MCP 工具执行失败时返回 `{ error: { code, name, message, severity, retryable, action } }`，
+  `code` 永远是数值（无 errno 时用 JSON-RPC 服务端错误保留码 `-32000`）。
+
+### 🧪 测试
+
+282 → **298 全绿**（新增 16 条：错误码表结构、CLI 信封、`--no-meta`、信封只追加不改既有字段、
+MCP 工具清单、CLI↔MCP 错误结构逐字段一致、MCP 结构化错误与信封）
+
+---
 ## v1.8.5 — 2026-11-02
 
 > 主题：**第二轮对抗性审核（文档对拍 + 正确性证伪）挖出的三个真实缺陷**。

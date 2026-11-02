@@ -173,4 +173,17 @@ bdp gsearch <gid> "玄空飞星资料" --exact --json # 文件名精确匹配（
 ```json
 { "error": "错误消息文本" }
 ```
+
+**统一响应信封**（v1.9.0）：所有 `--json` 输出都会追加 `meta`（只追加，不改既有字段）：
+```json
+"meta": { "command": "ls", "version": "1.9.0", "profile": null, "elapsedMs": 42 }
+```
+> 需要极简输出时加 `--no-meta`。
+
+**错误码解释**（`bdp error <code> --json`）：
+```json
+{ "code": -3, "codeText": "-3", "name": "SHARE_API_REJECTED",
+  "description": "群分享 API 拒绝请求……", "severity": "retryable",
+  "retryable": true, "action": "减小 --page-size……" }
+```
 > 出现 `{"error":...}` 时退出码为 1，参考 reference/troubleshooting.md 处理。

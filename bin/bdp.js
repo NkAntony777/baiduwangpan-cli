@@ -44,7 +44,7 @@ const group = require("../lib/group");
 const partial = require("../lib/partial");
 const pcsExtra = require("../lib/pcs-extra");
 const { matchesName } = require("../lib/name-match");
-const { ensureUtf8Console } = require("../lib/console");
+const { ensureUtf8Console, withMeta } = require("../lib/console");
 // 高危操作确认闸门（与 bdp rm 同款）：
 // 非交互环境（Agent / 管道）必须显式加 --yes，否则拒绝执行并返回退出码 1；
 // 交互式终端弹 y/N。
@@ -106,16 +106,19 @@ function formatSpeed(bps) {
   return (bps / Math.pow(1024, i)).toFixed(1) + " " + units[i];
 }
 
+// 当前命令的执行上下文（统一响应信封用）。在 main() 里按实际命令设置。
+let jsonCtx = { command: null, profile: null, startedAt: Date.now(), noMeta: false };
+
 function output(data, jsonFlag, formatter) {
   if (jsonFlag) {
-    console.log(JSON.stringify(data, null, 2));
+    console.log(JSON.stringify(withMeta(data, jsonCtx), null, 2));
   } else if (formatter) {
     formatter(data);
   }
 }
 
 function emitJson(data, args) {
-  const json = JSON.stringify(data, null, 2);
+  const json = JSON.stringify(withMeta(data, jsonCtx), null, 2);
   if (args.flags.jsonFile) {
     // 0600：JSON 里可能带 MCP 令牌，别让同机其他用户读到（POSIX 生效；Windows 需自行收紧 ACL）
     require("fs").writeFileSync(args.flags.jsonFile, json, { encoding: "utf-8", mode: 0o600 });
@@ -143,6 +146,8 @@ function parseArgs(argv) {
       opts.flags.legacyJson = true;
     } else if (arg === "--json-file") {
       opts.flags.jsonFile = argv[++i];
+    } else if (arg === "--no-meta") {
+      opts.flags.noMeta = true;
     } else if (arg === "--verbose") {
       opts.flags.verbose = true;
     } else if (arg === "--unique") {
@@ -1420,42 +1425,29 @@ cmds.cache = async (args, json) => {
 
 cmds.error = async (args, json) => {
   const code = args._[0] || "-3";
-  const ERRORS = {
-    "-10": "群文件转存接口已被百度下线（2026-08 实测：/mbox/msg/transfer 对非空目录一律 errno=-10，\n" +
-            "补 logId/channel 参数仍拒绝，新版 UI 已移除'保存'按钮）。\n" +
-            "处理：群文件用 bdp gdownload 直接下载（单文件 ≤~20MB；多文件 zip 打包 ≤~100MB），\n" +
-            "      更大文件用百度官方客户端。",
-    "-6": "接口鉴权失败。通常为 access_token/cookie 失效，请重新执行 bdp login。",
-    "2": "接口不支持或参数缺失（errno=2）。\n" +
-          "实测普通文件接口（/api/download、/api/filemetas）对群文件参数返回 errno=2。\n" +
-          "处理：群文件请走 bdp gdownload / bdp gsearch 的群专用接口。",
-    "-3": "群分享 API 拒绝请求。已观察到大目录、错误的 msgId/fromUk、过期分享、请求过于频繁(限流)都可能触发。\n" +
-          "处理：减小 --page-size（自动重试 50→20→10）或 --concurrency；\n" +
-          "      限流表现为 errno=0 但只返回目录自身（self-echo），工具会自动退避重试(1s/2s)；\n" +
-          "      大目录已支持自动全页遍历（每页上限 100，--max-pages 控制页数）；\n" +
-          "      若回退到父目录（fallback level=parent），Agent 应从父目录换路径继续遍历。",
-    "2131": "群分享 msg_id 不属于该群（shareinfo 以 msg_id 为查找键，from_uk 不参与校验）。\n" +
-            "常见原因：gid 与 --from-uk/--msg-id/--parent-fs-id 来自不同群/分享库（参数错配）。\n" +
-            "处理：用 bdp gshares <gid> 查看本群分享（或 bdp gsearch <gid> <关键词>），\n" +
-            "      取其中一行的 fsId/fromUk/msgId 重试，保证 gid/fsId/fromUk/msgId 同源；\n" +
-            "      fsId 为子目录时保持其父分享行的 fromUk/msgId 不变；\n" +
-            "      或去掉 --from-uk/--msg-id 让 CLI 自动解析（仅顶层分享）。\n" +
-            "      工具已支持：显式参数错配时自动按 fsId 纠正（结果含 autoResolved:true）。",
-    "31062": "文件名非法（file name is invalid）。\n" +
-              "处理：路径含非法字符或格式不符，重命名网盘文件后再试。",
-    "31090": "zip 打包总大小超出上限（package is too large，实测 452MB 即报 31090，10MB 正常）。\n" +
-              "处理：拆包下载，或大文件用百度官方客户端。",
-    "31326": "dlink 被反盗链拦截（HTTP 403，hitcode 104）。\n" +
-              "实测直链只接受 ≤~5MB 的有界 Range 请求，无界请求返回 403。\n" +
-              "处理：CLI 已按 4MB 分块自动规避；如仍报错，重跑 bdp get --resume（换新 dlink）。",
-  };
-  const msg = ERRORS[code] || `未知错误码 ${code}，请提交 Issue: https://github.com/NkAntony777/baiduwangpan-cli/issues`;
+  // 错误码表已抽到 lib/error-codes.js —— CLI 与 MCP 的 bdp_error 共用同一份结构
+  const errorCodes = require("../lib/error-codes");
+  if (args._[1] === "--list" || args.flags.list) {
+    const list = errorCodes.listErrors();
+    if (args.flags.jsonFile || json) {
+      emitJson({ count: list.length, errors: list }, args);
+    } else {
+      console.log("已知错误码 " + list.length + " 条：");
+      for (const e of list) {
+        console.log("  " + String(e.code).padStart(7) + "  " + e.severity.padEnd(11) + "  " + e.name);
+      }
+    }
+    return;
+  }
+  const info = errorCodes.describeError(code);
   if (args.flags.jsonFile || json) {
-    emitJson({ code, description: msg }, args);
+    emitJson(info, args);
   } else {
-    console.log(msg);
+    console.log(errorCodes.explainError(code));
   }
 };
+
+
 
 // ── Main ───────────────────────────────────────────────
 
@@ -2084,10 +2076,11 @@ const COMMANDS = {
   },
   error: {
     group: "group",
-    usage: "bdp error <code>",
-    desc: "解释错误码",
-    flags: [],
-    examples: ["bdp error -3", "bdp error 31326"],
+    usage: "bdp error <code> | bdp error --list",
+    desc: "解释错误码（--json 返回结构化错误码：code/name/severity/retryable/action）",
+    flags: ["list"],
+    options: ["--list       列出全部已知错误码"],
+    examples: ["bdp error -3", "bdp error 31326 --json", "bdp error --list --json"],
   },
   login: {
     group: "config",
@@ -2226,7 +2219,7 @@ function buildCommandHelp(name) {
 
 
 // 全局通用选项（所有命令都接受）；命令专属选项见 COMMANDS[name].flags
-const GLOBAL_FLAGS = ['json', 'jsonFile', 'legacyJson', 'verbose', 'profile'];
+const GLOBAL_FLAGS = ['json', 'jsonFile', 'legacyJson', 'verbose', 'profile', 'noMeta'];
 
 // 防呆：未知选项直接报错（agent 拼错参数立刻发现，而不是静默忽略）
 function validateFlags(command, flags, cmdMeta) {
@@ -2362,6 +2355,14 @@ async function main() {
   const command = rest[0];
   const args = parseArgs(rest.slice(1));
   const json = args.flags.json || false;
+
+  // 统一响应信封的上下文（command / profile / 计时起点 / --no-meta 开关）
+  jsonCtx = {
+    command: command || null,
+    profile: profileName !== undefined ? profileName : (args.flags.profile || null),
+    startedAt: Date.now(),
+    noMeta: args.flags.noMeta === true,
+  };
 
   // 切换账号 profile（须在命令 handler 之前，get()/isLoggedIn() 自动生效）
   const profile = profileName !== undefined ? profileName : args.flags.profile;
