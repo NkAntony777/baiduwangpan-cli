@@ -7,7 +7,7 @@
 专为 AI Agent 设计的百度网盘命令行工具
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Node.js](https://img.shields.io/badge/node-%3E%3D14-brightgreen)](https://nodejs.org)
+[![Node.js](https://img.shields.io/badge/node-%3E%3D22.5-brightgreen)](https://nodejs.org)
 [![npm version](https://img.shields.io/npm/v/baiduwangpan-cli)](https://www.npmjs.com/package/baiduwangpan-cli)
 [![npm downloads](https://img.shields.io/npm/dm/baiduwangpan-cli)](https://www.npmjs.com/package/baiduwangpan-cli)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-blue)]()

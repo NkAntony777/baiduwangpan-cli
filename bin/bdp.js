@@ -45,7 +45,10 @@ const partial = require("../lib/partial");
 const pcsExtra = require("../lib/pcs-extra");
 const { matchesName } = require("../lib/name-match");
 const { ensureUtf8Console } = require("../lib/console");
-const { sanitizeControl, sanitizeUntrusted } = require("../lib/sanitize");
+// markUntrusted（lib/sanitize.js）：CLI 的 JSON 通道把「来自网盘的正文」包上
+// <untrusted_file>…</untrusted_file> 边界标记，与 MCP 侧（lib/mcp.js 的 sanitizeToolResult）行为一致 ——
+// Agent 读到的正文一律是**数据**，不是可以执行的指令（防间接提示注入）。
+const { sanitizeControl, markUntrusted } = require("../lib/sanitize");
 
 // ── Utils ──────────────────────────────────────────────
 
@@ -716,7 +719,7 @@ cmds.cat = async (args, json) => {
   const text = pan.cat(filePath);
   const safe = sanitizeControl(text);
   if (json) {
-    console.log(JSON.stringify({ path: filePath, content: safe }));
+    console.log(JSON.stringify({ path: filePath, content: markUntrusted(safe) }));
   } else if (args.flags.number) {
     safe.split("\n").forEach((line, i) => {
       console.log(`${String(i + 1).padStart(6)}  ${line}`);
@@ -732,7 +735,7 @@ cmds.head = async (args, json) => {
   const n = args.flags.n || 20;
   const lines = pan.head(filePath, n).map(sanitizeControl);
   if (json) {
-    console.log(JSON.stringify({ path: filePath, lines: n, content: lines }));
+    console.log(JSON.stringify({ path: filePath, lines: n, content: markUntrusted(lines) }));
   } else {
     lines.forEach((l) => console.log(l));
   }
@@ -744,7 +747,7 @@ cmds.tail = async (args, json) => {
   const n = args.flags.n || 20;
   const lines = pan.tail(filePath, n).map(sanitizeControl);
   if (json) {
-    console.log(JSON.stringify({ path: filePath, lines: n, content: lines }));
+    console.log(JSON.stringify({ path: filePath, lines: n, content: markUntrusted(lines) }));
   } else {
     lines.forEach((l) => console.log(l));
   }
@@ -756,7 +759,11 @@ cmds.grep = async (args, json) => {
   if (!pattern || !filePath) { console.error("Usage: bdp grep <pattern> <path>"); process.exit(1); }
   const matches = pan.grep(pattern, filePath, { ignoreCase: args.flags.i });
   if (json) {
-    console.log(JSON.stringify({ path: filePath, pattern, matches }));
+    console.log(JSON.stringify({
+      path: filePath,
+      pattern,
+      matches: matches.map((m) => ({ line: m.line, content: markUntrusted(m.content) })),
+    }));
   } else {
     matches.forEach((m) => {
       if (args.flags.number) console.log(`${filePath}:${m.line}:${m.content}`);
@@ -769,7 +776,8 @@ cmds.peek = async (args, json) => {
   const filePath = args._[0];
   if (!filePath) { console.error("Usage: bdp peek <path>"); process.exit(1); }
   const info = await pan.peek(filePath);
-  output(info, json, (d) => {
+  const marked = { ...info, preview: info.preview ? markUntrusted(info.preview) : info.preview };
+  output(marked, json, (d) => {
     console.log(`Path:   ${d.path}`);
     console.log(`Size:   ${d.size ? formatSize(d.size) : "unknown"}`);
     console.log(`Type:   ${d.type || (d.isDir ? "directory" : "unknown")}`);
@@ -1453,6 +1461,7 @@ cmds.dedup = async (args, json) => {
     scannedFiles: result.scannedFiles,
     scannedDirs: result.scannedDirs,
     failedDirs: result.failedDirs,
+    failedDirPaths: (result.failedDirPaths || []).slice(0, 20),
     partial: result.partial,
     badEntries: result.badEntries,
     pagedOut: result.pagedOut,
@@ -1533,7 +1542,8 @@ cmds.preview = async (args, json) => {
     maxPages: args.flags.maxPages ? parseInt(args.flags.maxPages, 10) : undefined,
   });
   if (json || args.flags.jsonFile) {
-    emitJson(result, args);
+    const marked = { ...result, text: result.text ? markUntrusted(result.text) : result.text };
+    emitJson(marked, args);
     if (result.error) return 1;
     return;
   }
@@ -1642,7 +1652,10 @@ cmds.ask = async (args, json) => {
       ext: args.flags.ext,
     });
     if (json || args.flags.jsonFile) {
-      emitJson({ query, total: hits.length, indexFiles: st.files, hits }, args);
+      const markedHits = hits.map((h) => (h && typeof h.snippet === "string"
+        ? { ...h, snippet: markUntrusted(h.snippet) }
+        : h));
+      emitJson({ query, total: hits.length, indexFiles: st.files, hits: markedHits }, args);
       return;
     }
     if (!hits.length) {

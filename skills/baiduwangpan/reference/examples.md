@@ -112,7 +112,7 @@ bdp gsearch <gid> "玄空飞星资料" --exact --json # 文件名精确匹配（
 
 **ls**：
 ```json
-{ "path": "/", "entries": [ { "index": 0, "name": "a.pdf", "path": "/a.pdf", "isDir": false, "size": 123, "sizeText": "123 B", "mtime": 1760000000, "mtimeText": "..." } ], "total": 1, "fileCount": 1, "dirCount": 0, "totalText": "1 个文件", "warning": null }
+{ "path": "/", "entries": [ { "index": 0, "name": "a.pdf", "path": "/a.pdf", "isDir": false, "size": 123, "sizeText": "123 B", "mtime": 1760000000000, "mtimeText": "..." } ], "total": 1, "fileCount": 1, "dirCount": 0, "totalText": "123 B", "warning": null }
 ```
 
 **search**：

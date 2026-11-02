@@ -8,7 +8,7 @@ echo "=== baiduwangpan-cli 安装 ==="
 
 # 1. 检查 node
 if ! command -v node &>/dev/null; then
-  echo "❌ 未找到 Node.js。请先安装 Node.js 14+: https://nodejs.org"
+  echo "❌ 未找到 Node.js。请先安装 Node.js 22.5+（推荐 24）: https://nodejs.org"
   exit 1
 fi
 echo "✅ Node.js: $(node --version)"

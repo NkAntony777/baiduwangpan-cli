@@ -4,6 +4,42 @@
 
 ---
 
+## v1.8.5 — 2026-11-02
+
+> 主题：**第二轮对抗性审核（文档对拍 + 正确性证伪）挖出的三个真实缺陷**。
+
+### 🔴 实现缺陷（本轮新发现，均已实测复现与验证）
+
+- **`bdp gdownload`（群文件直下）自 v1.8.1 起一直是坏的**：`lib/http.js` 的 `webJsonAsync`
+  构造了 `init`（method/body）却只把 `headers` 传给 `fetchText` —— **POST 的 method 与 body 全被丢弃**，
+  native 传输下所有 POST 实际都发成了 GET。群聊 API 的 `/api/sharedownload` 必须带 body
+  （`uk`/`primaryid`/`fid_list`/`extra`），于是 `getShareDlink` / `getShareZipDlink` 直接 errno=2。
+  实测：同一调用在 curl 传输下能正确解析出「这是目录」，在 native 下报「分享已失效」。
+  现在 `fetchText` 透传 `init`，native 与 curl 行为一致。
+- **大文件中文乱码 + `grep` 中文静默漏检**：`lib/pan.js` 的 `trimTrailingPartialChar` 只按字节奇偶判断
+  「末尾是否被截断」，而 UTF-8 多字节字符被截断时**字节数可能是偶数** → 掉进 GBK 分支被误判成 GBK。
+  后果正是 v1.7.0 声称已修复的症状：`cat` 大文件乱码、`grep` 搜中文返回 0 条（英文正常）。
+  现在按 UTF-8 续字节规则裁掉不完整的尾部序列，并用严格 UTF-8 复验（裁错会被兜住）。
+- **`bdp get <目录> --dry-run` 会真的下载**：`lib/pan.js` 的 dry-run 检查排在「目录/无 dlink → 回退引擎」**之后**，
+  而引擎的 `d` 命令是真实下载。实测在只想预演时拉下了 47MB。
+  现在 dry-run 判定前移，目录路径也不会落盘。
+
+### 🟠 文档与契约
+
+- **CLI 的 `--json` 通道此前没有 `<untrusted_file>` 边界标记**（`sanitizeUntrusted` 在 CLI 侧是死代码），
+  而 SKILL.md / CHANGELOG 声称有。现在 CLI 与 MCP 两侧行为一致：
+  `cat`/`head`/`tail` 的 `content`、`grep` 的 `matches[].content`、`peek` 的 `preview[]`、
+  `preview` 的 `text`、`ask` 命中的 `snippet` 全部带标记。
+- `dedup` 的 `failedDirs` 是**数量**，路径在 `failedDirPaths`（此前文档写成「路径」，与实现不符）。
+- README 的 Node 徽章、`scripts/setup.ps1` / `setup.sh` 仍写 `Node 14+` → 统一为 `22.5+`。
+- `skills/baiduwangpan/README.md` 仍写「10 个带 schema 的工具」→ 改为 18 个。
+- `examples.md` 的 `ls` 示例：`mtime` 实为**毫秒**，`totalText` 实为**体积**（不是文件计数）。
+
+### 🧪 测试
+
+263 → **270 全绿**（新增 7 条：POST method/body 透传、UTF-8 尾部截断编码判定、GBK 不被误裁、markUntrusted、目录 dry-run 不落盘）
+
+---
 ## v1.8.4 — 2026-11-02
 
 > 主题：**三路对抗性审核的修复** —— 安全（红队）、正确性、文档-实现对拍。
@@ -12,7 +48,8 @@
 
 - **提示注入防线此前是死代码**：`sanitizeUntrusted` 从未被调用，MCP 返回的正文裸奔。
   现在所有 MCP 返回值都经 `sanitizeControl` 清洗，正文类字段额外包上
-  `<untrusted_file>…</untrusted_file>` 边界标记；CLI 的 `cat`/`head`/`tail`/`ls` 同样接入。
+  `<untrusted_file>…</untrusted_file>` 边界标记；**CLI 的 `--json` 通道同样接入**
+  （`cat`/`head`/`tail`/`grep`/`peek`/`preview`/`ask` 的正文与命中片段都会带标记，见 v1.8.5）。
 - **边界标记可被伪造**：载荷里若含 `</untrusted_file>` 会提前闭合标记 → 注入内容落到标记区外。
   现在写入前先中和载荷里的 `<untrusted_` / `</untrusted_`。
 - **控制字符覆盖不全**：只覆盖 C0/C1，RLO（`U+202E`）等 Unicode 格式字符全部存活 →

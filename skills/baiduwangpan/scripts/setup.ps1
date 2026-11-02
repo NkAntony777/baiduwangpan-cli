@@ -5,7 +5,7 @@ Write-Host "=== baiduwangpan-cli 安装 ===" -ForegroundColor Cyan
 
 # 1. 检查 node
 if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
-    Write-Host "❌ 未找到 Node.js。请先安装 Node.js 14+: https://nodejs.org" -ForegroundColor Red
+    Write-Host "❌ 未找到 Node.js。请先安装 Node.js 22.5+（推荐 24）: https://nodejs.org" -ForegroundColor Red
     exit 1
 }
 Write-Host "✅ Node.js: $(node --version)" -ForegroundColor Green
