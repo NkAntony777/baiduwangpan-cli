@@ -180,7 +180,9 @@ function parseSyncEngineList(md) {
  *   2. 不存在**同步**的 runPCS / runPCSResult 包装器（async 的不算）
  */
 function countSyncEngineCallSites() {
-  const files = ["lib/pan.js", "lib/pcs-extra.js", "lib/preview.js"];
+  // ⚠️ 必须包含 bin/ —— 此前只扫 lib/ 三个文件，
+  // 于是 bin/bdp.js 里的 spawnSync(cfg.pcsPath, ["login", …]) 逃过了这道闸门。
+  const files = ["lib/pan.js", "lib/pcs-extra.js", "lib/preview.js", "bin/bdp.js"];
   let n = 0;
   for (const f of files) {
     const src = read(path.join(ROOT, f));

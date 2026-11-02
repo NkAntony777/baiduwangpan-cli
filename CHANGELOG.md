@@ -4,6 +4,62 @@
 
 -----
 
+## v1.11.1 — 2026-11-02
+
+> 主题：**四路审核的修正版** —— v1.11.0 的两条对外声明被审核**实测证伪**，本版修正实现与措辞。
+> v1.11.0 的 tag 保留为历史记录；npm 上尚未发过 v1.11.0，本版是首个发布版本。
+
+### 🔧 修复
+
+**P1 —— 两条声明被实测证伪**
+
+- **「全库没有任何同步引擎调用点」不成立**：`bin/bdp.js` 的引擎登录此前是 `spawnSync`（30s 上限），
+  一次调用把整个 Node 进程冻住。现在改走 `lib/pan.js` 的异步 runner。
+  **契约测试的扫描范围也补上了 `bin/`** —— 此前只扫 lib/ 三个文件，正是它没抓到这里的原因
+  （审核用「在 bin/bdp.js 注入一个 spawnSync(cfg.pcsPath, …)」做突变测试验证过这个盲区）。
+- **「唯一还走同步子进程的是 curl 传输模式」不成立**：`lib/pan.js` 的 Range 读取**无条件**走
+  `http.curlRange`（内部 spawnSync），**没有传输门控** —— 于是**默认的 native 传输**下，
+  `cat`/`head`/`tail`/`grep` 每次都同步 fork curl，事件循环照样被冻住
+  （审核运行时实测：默认配置下 cat/head/grep 仍产生 `spawnSync("curl")`）。
+  现在按传输模式分流（与 `lib/preview.js` 的 readRange 同一套写法）：
+  native → `http.fetchRange`（异步 fetch），curl → `http.curlRange`。
+
+**P2**
+
+- **截断诊断在写操作上丢失**：`mkdir`/`rm`/`mv`/`cp`/`quota`/`share`/`offline`/`recycle`
+  直接调 `runPCSResultAsync` 却**不看截断标志**，25MB 的引擎输出会被当成「无输出」，
+  报出「无法解析输出」这种误导性结论。现在截断在**唯一出口**就抛错 —— 两条路径的诊断一致。
+- **`bdp share cancel` 中途失败会中断后续并丢掉已完成结果**：现在与 `bdp rm` 口径一致
+  —— 逐条汇总、单条失败不影响其余，部分失败退出码 1。
+- **`bdp organize --apply` / `bdp dedup --remove-duplicates` 部分失败时退出码仍是 0**：
+  Agent 只看退出码会把「部分没删掉」当成「全部成功」。现在部分失败退出码 1。
+- **MCP 成功响应里的逐条 error 未脱敏**：`bdp_rename` 的 `results[].error` 里的本地绝对路径
+  会原样进 Agent 上下文，现在走同一套 `sanitizeErrorMessage()`。
+- **`bdp config --json` 泄漏本地绝对路径**：`pcsPath`/`browserProfile` 现在与 `bdp whoami --json`
+  口径一致，脱敏后再输出。
+- 并发闸门归一化：`BDP_MCP_MAX_CONCURRENCY=0` 现在是 **1**（此前被 `|| 4` 吃掉，实际得到 4）。
+- 超时消息：小于 1s 时显示毫秒（此前显示「超时（0s）」这种自相矛盾的文案）。
+
+### 🧪 测试
+
+- 新增 `test/native-transport.test.js`（2 条）：native 传输下 `cat`/`head`/`tail`/`grep`
+  **不得**产生任何 `spawnSync` 调用（这条直接守住上面那个 P1）。
+- `test/async-engine.test.js` +1 条：写操作超限也要报「20MB」（截断诊断不能丢）。
+- 契约测试的「同步引擎调用点 = 0」断言**扩展到 `bin/`**。
+- 测试总数 407 → **410**。
+
+### 📚 文档
+
+- README / SKILL.md / commands.md 的同步路径说明改为**准确清单**：
+  明确区分「引擎调用点（已清零）」与「仍存在的同步子进程（curl 传输模式 / 群文件下载 / 预览 HEAD 兜底）」。
+- CHANGELOG v1.11.0 段的两条不实声明，由本段明确纠正（历史段保留原文，不改写历史）。
+
+### 📦 分发
+
+- 重新构建 `baiduwangpan-skill.zip`（38,343 字节 / 8 个文件）。
+
+---
+
 ## v1.11.0 — 2026-11-02
 
 > 主题：**全异步化** —— 消灭「同步引擎路径」这个类别。

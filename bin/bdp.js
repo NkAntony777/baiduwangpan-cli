@@ -410,21 +410,24 @@ cmds.login = async (args, json) => {
     });
     status("✅ 登录成功，凭证已保存到 " + config.CONFIG_FILE);
 
-    // 同步登录 BaiduPCS-Go 引擎（全盘操作依赖）
+    // 登录 BaiduPCS-Go 引擎（全盘操作依赖）—— **异步**调用
+    // 此前是 spawnSync：一次调用把整个 Node 进程冻住最长 30s（登录期间 CLI 完全无响应）。
     try {
-      const { spawnSync } = require("child_process");
-      const cfg = config.get();
-      const loginResult = spawnSync(cfg.pcsPath, ["login", `-bduss=${creds.bduss}`, `-stoken=${creds.stoken}`], {
-        encoding: "utf-8",
-        timeout: 30000,
-      });
-      if (loginResult.stdout && loginResult.stdout.includes("登录成功")) {
+      const panLib = require("../lib/pan");
+      const loginResult = await panLib.runPCSResultAsync(
+        ["login", `-bduss=${creds.bduss}`, `-stoken=${creds.stoken}`],
+        { timeoutMs: 30000 }
+      );
+      if (loginResult.output && loginResult.output.includes("登录成功")) {
         status("✅ BaiduPCS-Go 引擎已同步登录");
       } else {
-        status("⚠️ BaiduPCS-Go 引擎登录失败: " + (loginResult.stdout || loginResult.stderr || "未知错误").trim().substring(0, 100));
+        status(
+          "⚠️ BaiduPCS-Go 引擎登录失败: " +
+            (loginResult.output || loginResult.stderr || "未知错误").trim().substring(0, 100)
+        );
       }
     } catch (e) {
-      status("⚠️ BaiduPCS-Go 引擎登录异常: " + e.message);
+      status("⚠️ BaiduPCS-Go 引擎登录异常: " + sanitizeErrorMessage(e.message));
     }
 
     if (json) {
@@ -614,6 +617,8 @@ cmds.organize = async (args, json) => {
     console.log('');
     console.log('提示：加 --apply --yes 执行整理（会真实移动网盘文件）');
   }
+  // 部分失败 → 退出码 1（否则 Agent 只看退出码，会把「部分没移动」当成「全部成功」）
+  if (applied && applied.failed > 0) return 1;
 };
 cmds.config = async (args, json) => {
   // --set <key> <value>：写入配置（白名单 + 值校验）
@@ -672,6 +677,9 @@ cmds.config = async (args, json) => {
   const cfg = config.get();
   const showSecrets = args.flags.showSecrets === true;
   const masked = { ...cfg };
+  // pcsPath / browserProfile 都是**本地绝对路径**（含 Windows 用户名）—— 与 whoami 口径一致，脱敏后再输出
+  masked.pcsPath = redactLocalPaths(masked.pcsPath || "");
+  masked.browserProfile = redactLocalPaths(masked.browserProfile || "");
   if (showSecrets) {
     masked.redacted = false;
   } else {
@@ -1186,13 +1194,26 @@ cmds.share = async (args, json) => {
     if (ids.length === 0) { console.error("Usage: bdp share cancel <shareId> [shareId2 ...]"); process.exit(1); }
     // ⚠️ 不能用 ids.map(async …) —— map 不会等待 Promise，await 在非 async 回调里是语法错误。
     // 用 for…of 顺序执行（取消分享是写操作，本就不该并发）。
+    // 逐条汇总：单条失败**不影响其余**（与 bdp rm 口径一致）——
+    // 此前中途失败会跳出循环，既丢掉已完成的结果，也不再执行后面的 id。
     const results = [];
     for (const id of ids) {
-      const r = await pcsExtra.shareCancel(id);
-      results.push({ shareId: id, ok: r.ok });
+      try {
+        const r = await pcsExtra.shareCancel(id);
+        results.push({ shareId: id, ok: r.ok });
+      } catch (e) {
+        results.push({ shareId: id, ok: false, error: sanitizeErrorMessage(e.message) });
+      }
     }
     if (json || args.flags.jsonFile) emitJson(results, args);
-    else results.forEach((r) => console.log(`✅ 已取消分享 ${r.shareId}`));
+    else {
+      results.forEach((r) => {
+        if (r.ok) console.log(`✅ 已取消分享 ${r.shareId}`);
+        else console.error(`❌ 取消分享失败 ${r.shareId}: ${r.error}`);
+      });
+    }
+    // 部分失败 → 退出码 1（否则 Agent 只看退出码会把「有没取消掉」当成「全部成功」）
+    if (results.some((r) => !r.ok)) return 1;
   } else if (action === "list") {
     const r = await pcsExtra.shareListSafe(args.flags.page || 1);
     output(r, json, (d) => {
@@ -1646,6 +1667,8 @@ cmds.dedup = async (args, json) => {
   } else if (args.flags.removeDuplicates) {
     console.log('提示：加 --yes 可删除重复副本（走回收站，可恢复）');
   }
+  // 部分失败 → 退出码 1（与 bdp rm 口径一致）
+  if (removal && !removal.dryRun && removal.failed > 0) return 1;
 };
 
 cmds.preview = async (args, json) => {

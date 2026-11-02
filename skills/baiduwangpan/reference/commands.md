@@ -218,7 +218,7 @@ bdp organize [path] --by type --apply --yes   # 执行（真实移动网盘文�
 v1.9.0 起，每条命令的 `--json` 输出都会**追加**一个 `meta` 字段（只追加，不改任何既有字段）：
 
 ```json
-"meta": { "command": "ls", "version": "1.11.0", "profile": null, "elapsedMs": 42 }
+"meta": { "command": "ls", "version": "1.11.1", "profile": null, "elapsedMs": 42 }
 ```
 
 | 字段 | 含义 |
@@ -256,8 +256,12 @@ bdp --json        # → 报「缺少命令」，退出码 1（--json 下返回 J
 bdp               # → 打印帮助，退出码 0（裸跑惯例）
 ```
 
-**同步引擎路径：已清零**（v1.11.0）—— 此前 15 条命令走同步引擎（`spawnSync` 冻结整个事件循环，
-引擎挂死 = MCP 服务器整体不可用）。现已**全部**改为异步 spawn，写操作不再阻塞事件循环。
+**同步引擎路径：已清零**（v1.11.0，v1.11.1 复核）—— 此前 15 条命令走同步引擎（`spawnSync` 冻结
+整个事件循环，引擎挂死 = MCP 服务器整体不可用）。现已**全部**改为异步 spawn，写操作不再阻塞事件循环。
+
+> **仍存在的同步子进程**（都不是引擎调用）：`webTransport=curl` 的传输模式、群文件下载的 curl 通道、
+> 预览取大小的 HEAD 探测兜底。默认的 `native` 传输下，常规读路径（cat / head / tail / grep）
+> 已改为异步 fetch，不再同步 fork curl。
 
 > 所有引擎调用点（`lib/pan.js` / `lib/pcs-extra.js` / `lib/preview.js`）都带 timeout + killSignal ——
 > 引擎挂死不会冻结整个进程，只会让那一次调用在时限内明确失败（`severity: retryable`）。
@@ -597,7 +601,7 @@ bdp error --list --json     # 列出全部已知错误码
   "error": "文件或目录不存在",
   "errno": 31066,
   "errorCode": { "code": 31066, "name": "FILE_NOT_FOUND", "severity": "user-error", "retryable": false, "action": "…" },
-  "meta": { "command": "ls", "version": "1.11.0", "profile": null, "elapsedMs": 12 }
+  "meta": { "command": "ls", "version": "1.11.1", "profile": null, "elapsedMs": 12 }
 }
 ```
 

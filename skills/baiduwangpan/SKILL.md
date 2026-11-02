@@ -1,7 +1,7 @@
 ---
 name: baiduwangpan
 description: 百度网盘 CLI 操作技能 — 基于 baiduwangpan-cli (bdp) 命令，支持全盘文件浏览/搜索/免下载读取内容/上传下载/群聊文件浏览。当用户要求查看、搜索、读取、上传、下载百度网盘文件，或浏览百度网盘群聊文件时使用。
-version: 1.11.0
+version: 1.11.1
 authors:
   - NkAntony777
 credentials:
@@ -369,10 +369,12 @@ bdp organize [path] --by type --apply --yes   # 执行（真实移动网盘文�
     `--profile <name>` / `--json-file <path>` 都可以放在**命令之前**，也可以放在命令之后，
     布尔开关与带值选项**可任意交错**（如 `bdp --json --profile x error -3`）。
     带值选项的取值**不能以 `--` 开头** —— 否则报错退出 1（不再建垃圾 profile / 垃圾文件）。
-13. **同步引擎路径已清零**（v1.11.0）：此前 15 条命令走同步引擎（`spawnSync` 冻结整个事件循环，
-    引擎挂死 = MCP 服务器整体不可用）。现已**全部**改为异步 spawn —— 写操作不再阻塞事件循环。
+13. **同步引擎路径已清零**（v1.11.0，v1.11.1 复核）：此前 15 条命令走同步引擎（`spawnSync` 冻结
+    整个事件循环，引擎挂死 = MCP 服务器整体不可用）。现已**全部**改为异步 spawn —— 写操作不再阻塞事件循环。
     所有引擎调用点都带 timeout + killSignal：挂死只会让那一次调用在时限内明确失败
     （`severity: retryable`），不会冻结整个 MCP 服务器。
+    **仍存在的同步子进程**（都不是引擎调用）：`webTransport=curl` 的传输模式、群文件下载的 curl 通道、
+    预览取大小的 HEAD 兜底；默认的 `native` 传输下常规读路径已不再同步 fork curl。
 14. **MCP 并发闸门**：stdio 与 HTTP 两种传输的并发**工具调用**上限都是 **4**
     （`BDP_MCP_MAX_CONCURRENCY` 可调）。口径是**工具调用总数**、不是引擎进程数 ——
     走 web API 的工具（quota/dedup/organize/ask）同样占一个槽位。并发被压住时请**排队重试**，不要并发加压。

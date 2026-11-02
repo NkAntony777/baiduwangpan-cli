@@ -221,6 +221,28 @@ test("v1.11.0: 写操作走异步引擎 —— 并发期间定时器仍能触发
   );
 });
 
+test("v1.11.1: 写操作超限也要报「20MB」（截断诊断不能丢）", async () => {
+  mockMode = "bigStdout";
+  try {
+    // mkdir 走 runPCSResultAsync —— 截断必须在**唯一出口**抛错，
+    // 否则会报成「引擎未确认目录创建成功: (无输出)」这种误导性结论。
+    await assert.rejects(
+      () => pan.mkdir("/probe"),
+      (err) => {
+        assert.ok(/20MB/.test(err.message), "应含「20MB」: " + err.message);
+        return true;
+      }
+    );
+    // rm 逐条汇总：截断也应落进该条的 error
+    const removed = await pan.remove(["/probe"]);
+    assert.equal(removed.length, 1);
+    assert.equal(removed[0].ok, false);
+    assert.ok(/20MB/.test(removed[0].error), "应含「20MB」: " + removed[0].error);
+  } finally {
+    mockMode = "normal";
+  }
+});
+
 test("v1.11.0: 写操作的结果与失败语义不变（mkdir 幂等 / rm 逐条汇总）", async () => {
   const created = await pan.mkdir("/probe");
   assert.equal(created.created, true);
