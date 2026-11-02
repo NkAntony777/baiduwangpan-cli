@@ -23,8 +23,12 @@
 - **📄 免下载读取** — 通过 HTTP Range 直接读取文件内容到 stdout，无需下载整个文件
 - **👥 群聊文件浏览 + 下载** — 逆向 mbox API，列出群组、浏览群内分享库、搜索群文件，并支持**直接下载群文件到本地**（免转存）
 - **🤖 Agent 友好** — 所有命令支持 `--json` 结构化输出，零解析成本
+- **🔌 MCP 接入** — `bdp serve --mcp` 可作为 MCP 服务器运行，工具描述与参数 schema 由客户端自动发现
+- **📚 结构化目录/搜索** — `ls` / `search` 的 `--json` 返回真正的结构化 `entries[]`，不再需要解析文本表格
+- **🔤 编码自动识别** — UTF-8 / GBK / Big5 自动判别，中文古籍不再乱码，grep 不再静默漏检
+- **🚦 可信的退出码** — 命令失败一定以非零退出码结束，Agent 不会把失败当成功
 - **🔧 双模式** — 既是 CLI 工具，也可作为 Node.js 库 `require()` 使用
-- **🔐 凭证安全** — 配置存储在 `~/.bdp/config.json`，不写入代码或日志
+- **🔐 凭证安全** — 配置存储在 `~/.bdp/config.json`，不写入代码或日志；`bdp config` 默认脱敏
 
 ## 📌 能力一览
 
@@ -53,6 +57,9 @@
 | **下载群文件** | `bdp gdownload <gid> <fs_id>` | **直接下载到本地，免转存**（逆向 sharedownload API） |
 | 群目录树 | `bdp gtree <gid>` | BFS 构建目录树 |
 | 群缓存管理 | `bdp cache [clear]` | 查看 / 清空会话缓存 |
+| 列出我的分享 | `bdp share list` | 网页 API，绕过引擎 panic bug |
+| 错误码释义 | `bdp error -3` | 内置错误码字典 |
+| **MCP 服务器** | `bdp serve --mcp` | stdio 传输，10 个带 schema 的工具 |
 
 ## 🚀 快速开始
 
@@ -124,6 +131,26 @@ bdp gls 539478953581833690 742474845517885
 # 下载群文件到本地 (免转存)
 bdp gdownload 539478953581833690 954615608563687 -o ./downloads
 ```
+
+## 🆕 v1.7.0 新增
+
+| 改进 | 说明 |
+|:-----|:-----|
+| **凭证不再泄漏** | `bdp config --json` 此前会明文吐出完整 BDUSS/STOKEN（而 SKILL.md 要求 Agent 优先用 `--json`）。现已默认脱敏，JSON 带 `"redacted": true` |
+| **失败不再伪装成功** | `ls`/`get`/`put` 失败时退出码曾为 0（`get` 还会把失败报成"下载完成 0B"）。现统一以退出码 1 结束，JSON 带 `{"error","errno"}` |
+| **GBK 中文古籍修复** | 编码检测的 GBK 回退分支曾是死代码（`Buffer.toString("utf-8")` 永不抛错），导致 75% 字符乱码、grep 静默返回空。现自动识别 UTF-8/GBK/Big5 |
+| **ls/search 结构化** | `--json` 从"塞一段文本表格"改为真正的 `entries[]`（index/name/path/isDir/size/mtime） |
+| **search 分页** | 新增 `--limit`/`--page`/`--max-results`/`--fields`；输出含 `total`/`hasMore`/`nextPage`，避免一次搜索吃掉 13 万 tokens |
+| **二进制守卫** | PDF/zip/图片/音视频不再被当文本读取，直接报错并提示改用 `bdp get` |
+| **du 完整性** | `capped`/`partial` 沿路径向上传播，不再出现"capped:false 但 size 不完整"；新增 `--progress`、`depthLimit`、`depthCapped` |
+| **share list 可用** | 改走网页 API，绕过引擎 panic bug |
+| **rm 批量 + 确认** | 支持多路径删除、`--yes`、结构化输出 |
+| **mkdir 幂等** | 目录已存在不再报失败 |
+| **gls nextPage** | 补上 SKILL.md 一直引用却不存在的翻页字段 |
+| **error -3 可用** | 负数错误码此前无法执行（`bdp error -- -3` 现在也支持） |
+| **MCP 服务器** | `bdp serve --mcp` 暴露 10 个带 JSON Schema 的工具 |
+
+> v1.6.0 及更早版本的行为差异详见 [CHANGELOG.md](CHANGELOG.md)。
 
 ## 📖 完整命令参考
 
@@ -397,6 +424,9 @@ baiduwangpan-cli/
 │   ├── group.js              # 群聊操作 (逆向 mbox API)
 │   ├── pcs-extra.js          # 引擎扩展命令 (mv/cp/quota/offline/share)
 │   ├── name-match.js         # 文件名匹配 (glob/正则/AND/OR)
+│   ├── table.js              # pcstable 表格解析 (CJK 显示宽对齐)
+│   ├── file-type.js          # 二进制文件类型识别 (魔数)
+│   ├── mcp.js                # MCP 服务器 (stdio, JSON-RPC 2.0)
 │   └── console.js            # Windows 控制台编码兜底 (chcp 65001)
 ├── test/                     # Node.js 回归测试
 ├── skills/
@@ -456,7 +486,10 @@ skills/baiduwangpan/
 - **下载限速**：非 SVIP 用户下载受百度限速策略限制
 - **cat 限制**：为防止误读超大文件，`cat` 默认限制 1MB，可通过 `BDP_MAX_CAT_BYTES` 环境变量调整
 - **群聊文件**：群聊 API 为逆向获取，可能随百度服务端变更而失效
-- **share list**：BaiduPCS-Go v4.0.1 的 `share list` 有引擎 bug（panic），CLI 会提示替代方案；`share set/cancel` 正常
+- **share list**：v1.7.0 起改走网页 API（BaiduPCS-Go v4.0.1 引擎的 `share list` 有 panic bug，网页 API 正常）
+- **rm 高危**：非交互环境（Agent/管道）执行 `bdp rm` 必须显式加 `--yes`，否则拒绝执行并返回退出码 1；交互终端会弹 y/N 确认
+- **config 脱敏**：`bdp config` / `bdp config --json` 默认对 BDUSS/STOKEN 脱敏（`"redacted": true`），仅 `--show-secrets` 才输出原值
+- **du 的 size 可能偏小**：百度没有服务端目录大小接口，`du` 靠递归求和，默认只扫 3 层；JSON 里 `partial: true` 表示因深度封顶而不完整，**实际占用以 `bdp quota` 为准**
 - **PowerShell 中文乱码**：CLI 启动时自动 `chcp 65001`（仅 TTY 且非 UTF-8 代码页时），中文正常显示；管道/重定向场景无副作用
 - **1.1.0 升级**：若引擎丢失（postinstall 网络失败），CLI 会自动发现 `BaiduPCS-Go-v*` 版本子目录中的二进制；config 里失效的绝对 `pcsPath` 也会自动回退到自动发现，无需手改配置
 

@@ -1,7 +1,7 @@
 ---
 name: baiduwangpan
 description: 百度网盘 CLI 操作技能 — 基于 baiduwangpan-cli (bdp) 命令，支持全盘文件浏览/搜索/免下载读取内容/上传下载/群聊文件浏览。当用户要求查看、搜索、读取、上传、下载百度网盘文件，或浏览百度网盘群聊文件时使用。
-version: 1.1.3
+version: 1.7.0
 authors:
   - NkAntony777
 credentials:
@@ -24,6 +24,7 @@ credentials:
 - **上传下载**：网盘与本地之间传输文件（size 校验 + 断点续传）
 - **群聊文件**：列出群组、浏览群内分享库、搜索群文件
 - **结构化输出**：所有命令支持 `--json` 输出，便于程序化解析
+- **MCP 接入**：`bdp serve --mcp` 可作为 MCP 服务器运行，工具描述与参数 schema 由客户端自动发现
 - **运行时发现用法**：`bdp help [command] --json` 返回全部命令的 usage/desc/options/examples（结构化）。不确定某命令的用法/参数时先 `bdp help <命令> --json` 查询，不要凭记忆猜测参数
 
 ## Trigger
@@ -63,7 +64,7 @@ bdp login --bduss <BDUSS值> --stoken <STOKEN值>
 
 ## Recommended Entry Point
 
-命令不确定或执行报错时，先运行 `bdp --help` 查看全部可用命令与参数（离线、无网络请求），再对照 reference/commands.md 重试。所有命令支持 `--json` 输出；失败时输出 `{"error":"..."}`（见 reference/troubleshooting.md 的错误表格）。
+命令不确定或执行报错时，先运行 `bdp help --json` 查看全部可用命令与参数（离线、无网络请求），再对照 reference/commands.md 重试。所有命令支持 `--json` 输出；失败时输出 `{"error":"...","errno":N}` 并**以非零退出码结束**（见 reference/troubleshooting.md 的错误表格）。
 
 ## 安装
 
@@ -79,52 +80,67 @@ bdp whoami   # 验证
 ```
 
 > **安全**：BDUSS/STOKEN 是敏感凭证。配置后存放在 `~/.bdp/config.json`。Agent 不得打印、输出或回显配置文件中凭证的完整内容。
+> `bdp config` 与 `bdp config --json` **默认对凭证脱敏**（输出前 10 位 + 省略号 + 后 4 位，并带 `"redacted": true`）。只有显式加 `--show-secrets` 才会输出原值——除非用户明确要求，否则不要使用该选项。
 
 ## 命令速查
 
 ### 网盘文件操作
 
 ```bash
-bdp ls [path]                      # 列出目录
+bdp ls [path]                      # 列出目录（--json 返回 entries[] 结构化）
 bdp search <keyword> [-p dir]      # 搜索文件名（默认全盘 /）
 bdp cat <path>                     # 读取文件内容（免下载，限1MB）
 bdp head [-n N] <path>             # 读取前N行（默认20）
 bdp tail [-n N] <path>             # 读取后N行
-bdp grep <pattern> <path>          # 在文件内容中搜索
-bdp peek <path>                    # 预览文件信息
+bdp grep <pattern> <path>          # 搜索文件内容
+bdp peek <path>                    # 预览文件信息（含类型/编码）
 bdp get <path> [-o dir]            # 下载到本地
 bdp put <local> <remote>           # 上传
-bdp mkdir <path>                   # 创建目录
-bdp rm <path>                      # 删除
+bdp mkdir <path>                   # 创建目录（幂等）
+bdp rm <path> [path2 ...] [--yes]  # 删除（批量，高危）
+bdp mv <src> <dst>                 # 移动/重命名
+bdp cp <src> <dst>                 # 拷贝
+bdp quota                          # 网盘配额
+bdp du [path]                      # 目录容量分析
+bdp offline add <http_url>         # 离线下载
+bdp recycle list                   # 回收站
+bdp share set|cancel|list          # 分享管理
 ```
 
 ### 群聊文件操作
 
 ```bash
 bdp groups                         # 列出所有群组（拿 gid）
-bdp gshares <gid> [--no-cache]     # 列出群内分享库（拿 fs_id，自动游标翻页）
+bdp gshares <gid> [--no-cache]     # 列出群内分享库（拿 fs_id）
 bdp gls <gid> <fs_id> [--page N] [--page-size N] [--from-uk X] [--msg-id Y] [--parent-fs-id Z]
-                                   # 浏览分享库内容（默认 page-size 50，最大 100）
-bdp gsearch <gid> <keyword>        # 搜索群文件名（全量遍历目录，缓存命中秒回）
+bdp gsearch <gid> <keyword>        # 搜索群文件名（全量遍历，缓存命中秒回）
     [--page N] [--limit N] [--depth N] [--concurrency N] [--max-pages N] [--max-requests N]
     [--no-unique] [--all|--all-results] [--timeout N] [--save-partial]
     [--any-word] [--exact] [--no-cache] [--verbose] [--json-file <path>]
-bdp gdownload <gid> <fs_id> [fs_id2 ...]   # 直接下载群文件到本地（免转存）
-    # 单 fs_id → 单文件直下；多 fs_id（同一分享消息）→ zip 打包下载
-    [-o dir] [--filename NAME] [--from-uk X] [--msg-id Y] [--no-cache]
+bdp gdownload <gid> <fs_id>...     # 直接下载群文件（免转存）
 bdp cache [clear]                  # 查看/清空会话缓存（~/.bdp/cache/，目录30min/分享5min）
 bdp error <code>                   # 查看错误码说明（如 -3 / 2131）
 ```
 
-**群文件下载限制**（实测）：单文件 ≤ ~20MB 直接下载；同消息多文件 zip 打包（总包 ≤ ~100MB）；大文件网页端受限（单文件加密 / zip 报 31090），转存已被百度下线 → 大文件需官方客户端
+### MCP 接入（推荐给 Agent 客户端）
 
-### 通用选项
+```bash
+bdp serve --mcp        # 启动 MCP 服务器（stdio, JSON-RPC 2.0）
+bdp serve --json       # 查看 MCP 模式信息（不启动）
+```
+
+暴露 10 个工具：`bdp_ls` / `bdp_search` / `bdp_read` / `bdp_peek` / `bdp_quota` /
+`bdp_get` / `bdp_put` / `bdp_mkdir` / `bdp_groups` / `bdp_gsearch`，
+每个都带强类型 JSON Schema，客户端可自动发现。
+
+## 通用选项
 
 ```bash
 --json            # 结构化 JSON 输出（Agent 首选）
 --json-file <p>   # JSON 写入文件（UTF-8，绕过控制台编码）
 --legacy-json     # 输出裸数组（旧版兼容）
---verbose         # 进度/日志只写 stderr，不污染 stdout
+--verbose         # 进度/日志只写 stderr
+--profile <name>  # 切换账号 profile
 ```
 
 ## 推荐执行模式
@@ -132,26 +148,49 @@ bdp error <code>                   # 查看错误码说明（如 -3 / 2131）
 **Agent 应优先使用 `--json` 输出**，例如：
 
 ```bash
-# 找文件（全盘）
-bdp search "报告" --json
+# 找文件（全盘）—— 注意分页，别一次拉几千条
+bdp search "报告" --limit 20 --json
+bdp search "报告" --limit 20 --page 2 --json          # 翻下一页（hasMore/nextPage 告知）
+bdp search "报告" --limit 50 --fields path,size --json  # 只要需要的字段，压缩体积
 
 # 读文件内容
 bdp head -n 50 /文档/日志.txt --json
 
 # 群聊文件
 bdp groups --json
-bdp gsearch 539478953581833690 "倪海厦" --json
+bdp gsearch 539478953581833690 "倪海厦" --limit 20 --json
 ```
 
-**群聊文件浏览工作流**：
+### 结果规模控制（重要）
+
+全盘 `search` 命中数可能上千（实测"中医"→1842 条），**默认单页只返回 50 条**：
+
+- JSON 字段 `total`（总命中）/ `returned`（本页条数）/ `hasMore`（还有更多）/ `nextPage`（下一页页码）
+- `hasMore: true` 时用 `--page <nextPage>` 继续翻
+- `--max-results N` 设硬上限
+- `--fields a,b,c` 只返回指定字段（path/name/size/sizeText/mtime/mtimeText/isDir/index）
+
+`ls` / `gls` / `gsearch` 同理：`gls` 与 `gsearch` 的 JSON 都带 `hasMore` 与 `nextPage`。
+
+### 编码与二进制（v1.7.0 起）
+
+- **编码自动识别**：`cat`/`head`/`tail`/`grep`/`peek` 会自动识别 UTF-8 / GBK / Big5。
+  中文古籍（GB2312/GBK）不再乱码，`grep` 也能正确命中（此前会静默返回空）。
+- `peek` 的 JSON 里 `encoding` 字段报告实际使用的编码，`type` 报告文件类型。
+- **二进制拒绝按文本读**：对 PDF / zip / 图片 / 音视频等，`cat`/`head`/`tail`/`grep` 会
+  报错并提示改用 `bdp get` 下载，而不是把乱码灌进上下文。
+
+### 群聊文件浏览工作流
+
 1. `bdp groups --json` → 获取 `gid`
 2. `bdp gshares <gid> --json` → 获取顶层分享目录 `fsId`
 3. `bdp gls <gid> <fsId> --json` → 浏览子目录/文件（默认取 50 条）
 4. `bdp gsearch <gid> <keyword> --json` → 按名称搜索
-5. `bdp gdownload <gid> <fsId> -o ./下载目录` → 直接下载群文件到本地（免转存；fs_id 来自 gls/gsearch 结果，子文件自动解析来源）
+5. `bdp gdownload <gid> <fsId> -o ./下载目录` → 直接下载群文件到本地（免转存）
 
 **分页与遍历规则（Agent 必须遵守）**：
 - gsearch/gls 默认只取 20-50 条；看到 `hasMore: true` 时用 `--page <nextPage>` 继续翻页
+  （`nextPage` 字段就是下一页页码，v1.7.0 起 `gls` 也提供该字段）
 - 每个结果携带 `parentFsId`/`fromUk`/`msgId`，爬取子目录时通过 `gls --from-uk --msg-id --parent-fs-id` 传入
 - 若响应含 `fallback`（level=parent），说明目标目录 API 拒绝（errno=-3），应从 `resolvedFsId`（父目录）换路径继续遍历
 - `partial: true` 表示部分分享扫描失败，结果不完整，可重试或换关键词；`throttled: true` 表示 API 限流中断，重跑命令可续扫（磁盘缓存只补缺失目录）
@@ -164,11 +203,15 @@ bdp gsearch 539478953581833690 "倪海厦" --json
 
 ## 安全边界
 
-1. **凭证保护**：绝不输出/记录 `~/.bdp/config.json` 中的 BDUSS、STOKEN 值。`bdp config` 输出含前 10 位掩码，同样禁止回显
-2. **删除操作**：`bdp rm` 为高风险操作，执行前需用户明确确认
+1. **凭证保护**：绝不输出/记录 `~/.bdp/config.json` 中的 BDUSS、STOKEN 值。`bdp config` 输出已脱敏，
+   但仍不得回显完整凭证；`--show-secrets` 仅在用户明确要求时使用
+2. **删除操作**：`bdp rm` 为高危操作。非交互环境（Agent / 管道）**必须显式加 `--yes`**，
+   否则命令会拒绝执行并返回退出码 1；交互式终端会弹 y/N 确认。删除前建议先 `--dry-run` 预览
 3. **写入操作**（put/mkdir/rm）：先向用户列出执行计划，确认后再执行
 4. **下载目录**：默认保存到用户指定目录或当前工作目录，不写入系统目录
 5. **cat 限制**：`cat` 默认限 1MB（防误读大文件），大文件用 `head/tail` 分段读取
+6. **退出码可信**：命令失败时 `bdp` 一定以非零退出码结束，JSON 输出带 `error` 字段。
+   不要只看 stdout 内容就判定成功——请检查退出码
 
 ## 详细文档
 

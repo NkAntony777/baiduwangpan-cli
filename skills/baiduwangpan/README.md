@@ -42,6 +42,8 @@ bdp whoami
 
 > BDUSS/STOKEN 获取方法见 `reference/authentication.md`
 
+> `bdp config` 默认对凭证脱敏；`--show-secrets` 才会输出原值。
+
 ## 技能内容
 
 ```
@@ -65,7 +67,11 @@ baiduwangpan/
 | 免下载读取内容 | `bdp cat` / `bdp head` / `bdp tail` / `bdp grep` |
 | 上传/下载 | `bdp put` / `bdp get` |
 | 群聊文件浏览 | `bdp groups` / `bdp gshares` / `bdp gls` / `bdp gsearch` |
-| 结构化输出 | 所有命令支持 `--json` |
+| 结构化输出 | 所有命令支持 `--json`（`ls`/`search` 返回结构化 `entries[]`） |
+| 分页与限流 | `--limit` / `--page` / `--max-results` / `--fields` |
+| 编码自动识别 | UTF-8 / GBK / Big5 自动判别（中文古籍不再乱码） |
+| 二进制安全 | PDF/zip/图片等拒绝按文本读取，避免乱码灌入上下文 |
+| MCP 接入 | `bdp serve --mcp`（stdio，10 个带 schema 的工具） |
 
 ## 安全说明
 

@@ -35,6 +35,9 @@ bdp ls [path]
 
 - `path` 默认 `/`（网盘根目录）
 - 支持任意路径，全盘可访问
+- `--json` 返回**结构化** `entries[]`（index/name/path/isDir/size/sizeText/mtime/mtimeText），
+  并含 `fileCount` / `dirCount` / `totalText` 汇总
+- 目录不存在时返回 `{"error":"...","errno":31066}` 且**退出码为 1**
 
 ```bash
 bdp ls /
@@ -56,12 +59,26 @@ bdp search <keyword> [-p <dir>] [--regex 正则] [--glob 通配符] [--any-word]
   - `--any-word "pdf csv"` — 空格分词，命中任意一个
   - `--exact "报告.pdf"` — 整名精确相等
 
+**分页与限流**（v1.7.0 起，全盘搜索命中数可能上千，默认只返回 50 条）：
+
+| 选项 | 说明 |
+|------|------|
+| `--limit N` | 单页条数（默认 50） |
+| `--page N` | 页码（默认 1） |
+| `--max-results N` | 硬上限，截断总结果数 |
+| `--fields a,b,c` | 只返回指定字段（path/name/size/sizeText/mtime/mtimeText/isDir/index） |
+
+`--json` 输出含 `total`（总命中）/ `returned`（本页条数）/ `hasMore` / `nextPage`。
+看到 `hasMore: true` 用 `--page <nextPage>` 继续翻。
+
 ```bash
 bdp search "报告"
 bdp search "数据集" -p /学校
 bdp search "中医" --json
 bdp search "玄空*.pdf" --glob
 bdp search "玄空.+pdf$" --regex
+bdp search "中医" --limit 20 --fields path,size --json   # 压缩输出体积
+bdp search "中医" --limit 20 --page 2 --json              # 翻页
 ```
 
 ### cat — 读取文件内容（免下载）
@@ -112,6 +129,8 @@ bdp grep <pattern> <path> [-i] [-N]
 
 - `-i` 忽略大小写
 - `-N`（或 `-n`，两者等价）显示行号
+- **编码自动识别**（v1.7.0）：UTF-8 / GBK / Big5 都能正确匹配。
+  中文古籍（GB2312/GBK）此前会**静默返回空**，现已修复
 
 ```bash
 bdp grep "ERROR" /文档/log.txt
@@ -127,9 +146,12 @@ bdp grep "keyword" /文档/data.txt -i --json
 bdp peek <path>
 ```
 
-- 显示大小、类型（文本/二进制）、dlink 可用性
+- 显示大小、类型、dlink 可用性
 - 含 md5 / server_ctime / local_ctime（web API 可用时）
 - 文本文件自动预览前 10 行
+- `type` 字段给出文件类型（text/pdf/zip/docx/image/audio/video…），
+  `binary` 标记是否二进制，`encoding` 报告实际使用的字符编码（utf-8/gbk/big5）
+- 二进制文件（PDF/zip/图片/音视频）不再把源码当文本吐出
 
 ```bash
 bdp peek /文档/report.pdf
@@ -173,6 +195,8 @@ bdp put ./x.pdf /文档/ --dry-run   # 模拟
 bdp mkdir <path>
 ```
 
+**幂等**（v1.7.0）：目录已存在不算失败，`--json` 返回 `{"created":false,"exists":true}`。
+
 ```bash
 bdp mkdir /新项目
 bdp mkdir /文档/2026
@@ -181,14 +205,20 @@ bdp mkdir /文档/2026
 ### rm — 删除文件/目录
 
 ```
-bdp rm <path> [--dry-run]
+bdp rm <path> [path2 ...] [--dry-run] [--yes]
 ```
 
 ⚠️ 高危操作，Agent 使用前必须用户确认。
 
+- 支持批量删除（v1.7.0），`--json` 返回每个路径的 `ok`/`error`
+- **非交互环境（Agent / 管道）必须显式加 `--yes`**，否则拒绝执行并返回退出码 1
+- 交互式终端会弹 y/N 确认
+- 删除的文件可在回收站找回
+
 ```bash
-bdp rm /临时文件.txt
-bdp rm /临时文件.txt --dry-run   # 模拟
+bdp rm /临时文件.txt --dry-run        # 模拟
+bdp rm /临时文件.txt --yes            # Agent 执行
+bdp rm /a.txt /b.txt --yes            # 批量
 ```
 
 ### mv — 移动/重命名
@@ -223,10 +253,21 @@ bdp du [path] [--depth N] [--top N] [--concurrency N]
 - 输出每个子目录的聚合大小，找空间大户；深度封顶的子目录标记 [深度封顶]
 - 全盘扫描较慢（API 限制），建议先 `bdp du /` 看顶层，再对大户目录深扫
 
+**深度封顶与完整性**（v1.7.0）：
+
+- 深度上限为 8（`--depth` 超过会被钳制，`depthCapped` 字段告知）
+- 超过上限的子树不会被扫描 → 该目录的 size **不完整**
+  （实测 `--depth 3` 时扫出 598GB，而 `bdp quota` 显示已用 6.64TB）
+- JSON 里 `partial: true` 表示本次结果因深度封顶而不完整；
+  子目录的 `capped`（自身未扫描）/ `partial`（子树未扫全）分别标注
+- **实际占用以 `bdp quota` 为准**；要更准就加大 `--depth`
+- `--progress` 在 stderr 实时输出扫描进度（目录数/文件数/队列/耗时）
+
 ```bash
 bdp du /                          # 顶层分布
 bdp du /玄学 --depth 5 --top 20   # 深扫指定目录
 bdp du / --json                   # JSON 输出
+bdp du / --progress               # 实时进度
 ```
 
 ### recycle — 回收站管理
@@ -273,17 +314,36 @@ bdp share list
 ```
 
 - `--combined` 直接输出带提取码的可复制链接
-- `share list` 受 BaiduPCS-Go v4.0.1 引擎 bug 限制（panic），用 `share cancel` 管理已知分享
+- `share list` 走**网页 API** `/share/record`（v1.7.0 起）。
+  BaiduPCS-Go v4.0.1 引擎的 `share list` 有 panic bug，网页 API 正常，
+  输出含 shareId / 链接 / 提取码 / 过期时间 / 浏览次数，`source` 字段标明来源
 
 ## 配置命令
 
 ```
 bdp login --bduss <X> --stoken <Y>   # 保存凭证
 bdp whoami                            # 检查登录状态
-bdp config                            # 查看配置
+bdp config                            # 查看配置（凭证脱敏）
+bdp config --show-secrets             # 显式输出原值（谨慎使用）
 bdp profile list / use <name> / unset   # 多账号 profile
 bdp --profile <name> <命令>            # 全局参数，命令前/后均可
+bdp serve --mcp                       # 启动 MCP 服务器（stdio）
 ```
+
+> `bdp config` 与 `bdp config --json` **默认脱敏** BDUSS/STOKEN
+> （前 10 位 + `...` + 后 4 位，JSON 带 `"redacted": true`）。
+> 仅在用户明确要求时才用 `--show-secrets`。
+
+### serve — MCP 服务器
+
+```
+bdp serve --mcp      # 启动 MCP 服务器（stdio, JSON-RPC 2.0, 换行分隔）
+bdp serve --json     # 查看 MCP 模式信息，不启动
+```
+
+暴露 10 个带 JSON Schema 的工具：`bdp_ls` / `bdp_search` / `bdp_read` / `bdp_peek` /
+`bdp_quota` / `bdp_get` / `bdp_put` / `bdp_mkdir` / `bdp_groups` / `bdp_gsearch`。
+工具执行失败时返回 `isError: true` 并附中文错误说明。
 
 返回群组名 + gid。
 
@@ -418,6 +478,8 @@ bdp cache clear
 ```
 bdp error <code>
 ```
+
+> 负数错误码直接作为参数即可（`bdp error -3`）；也支持 `bdp error -- -3`。
 
 ```bash
 bdp error -3

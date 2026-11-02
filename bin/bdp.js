@@ -86,8 +86,12 @@ function verboseLog(args, msg) {
 
 function parseArgs(argv) {
   const opts = { _: [], flags: {} };
+  // "--" 之后一律按位置参数处理（如 bdp error -- -3）
+  let positionalOnly = false;
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
+    if (positionalOnly) { opts._.push(arg); continue; }
+    if (arg === "--") { positionalOnly = true; continue; }
     if (arg === "--json") {
       opts.flags.json = true;
     } else if (arg === "--legacy-json") {
@@ -136,6 +140,10 @@ function parseArgs(argv) {
       opts.flags.top = parseInt(argv[++i], 10) || 15;
     } else if (arg === "--limit") {
       opts.flags.limit = parseInt(argv[++i], 10) || 50;
+    } else if (arg === "--max-results") {
+      opts.flags.maxResults = parseInt(argv[++i], 10) || 0;
+    } else if (arg === "--fields") {
+      opts.flags.fields = String(argv[++i] || "").split(",").map((x) => x.trim()).filter(Boolean);
     } else if (arg === "--concurrency") {
       opts.flags.concurrency = parseInt(argv[++i], 10) || 4;
     } else if (arg === "--depth") {
@@ -166,6 +174,10 @@ function parseArgs(argv) {
       opts.flags.combined = true;
     } else if (arg === "--dry-run") {
       opts.flags.dryRun = true;
+    } else if (arg === "--yes" || arg === "-y") {
+      opts.flags.yes = true;
+    } else if (arg === "--show-secrets") {
+      opts.flags.showSecrets = true;
     } else if (arg === "--profile") {
       opts.flags.profile = argv[++i];
     } else if (arg === "--from-uk") {
@@ -174,6 +186,9 @@ function parseArgs(argv) {
       opts.flags.msgId = argv[++i];
     } else if (arg === "--parent-fs-id") {
       opts.flags.parentFsId = argv[++i];
+    } else if (/^-\d/.test(arg)) {
+      // 负数按位置参数处理（如 bdp error -3）
+      opts._.push(arg);
     } else if (arg.startsWith("-")) {
       opts.flags[arg.replace(/^-+/, "")] = true;
     } else {
@@ -286,28 +301,41 @@ cmds.whoami = async (args, json) => {
   );
 };
 
+// 凭证脱敏：--json 曾经明文吐出完整 BDUSS/STOKEN，
+// 而 SKILL.md 恰恰要求"Agent 优先用 --json" —— 等于每次调用都把会话密钥写进上下文。
+// 现在统一脱敏；确需原值时显式加 --show-secrets（且该行为会在输出里标注）。
+function maskSecret(s) {
+  if (!s) return "";
+  const str = String(s);
+  if (str.length <= 14) return str.slice(0, 4) + "***";
+  return str.slice(0, 10) + "..." + str.slice(-4);
+}
+
+const SECRET_KEYS = ["bduss", "stoken", "cookie"];
+
 cmds.config = async (args, json) => {
   const cfg = config.get();
-  output(cfg, json, (d) => {
-    console.log("Configuration:");
-    console.log(`  bduss:     ${d.bduss ? d.bduss.substring(0, 10) + "..." : "(not set)"}`);
-    console.log(`  stoken:    ${d.stoken ? d.stoken.substring(0, 10) + "..." : "(not set)"}`);
-    console.log(`  web API:   ${d.webTransport}`);
-    console.log(`  pcsPath:   ${d.pcsPath}`);
-    console.log(`  ua:        ${d.ua.substring(0, 40)}...`);
-    console.log(`  maxBytes:  ${d.maxBytes}`);
-    console.log(`  file:      ${config.CONFIG_FILE}`);
-  });
-};
-
-cmds.ls = async (args, json) => {
-  const dirPath = args._[0] || "/";
-  const raw = pan.ls(dirPath);
-  if (json) {
-    console.log(JSON.stringify({ path: dirPath, raw }));
+  const showSecrets = args.flags.showSecrets === true;
+  const masked = { ...cfg };
+  if (showSecrets) {
+    masked.redacted = false;
   } else {
-    console.log(raw);
+    for (const k of SECRET_KEYS) {
+      if (masked[k]) masked[k] = maskSecret(masked[k]);
+    }
+    masked.redacted = true;
   }
+  output(masked, json, (d) => {
+    console.log("Configuration:");
+    console.log("  bduss:     " + (d.bduss || "(not set)"));
+    console.log("  stoken:    " + (d.stoken || "(not set)"));
+    console.log("  web API:   " + d.webTransport);
+    console.log("  pcsPath:   " + d.pcsPath);
+    console.log("  ua:        " + d.ua.substring(0, 40) + "...");
+    console.log("  maxBytes:  " + d.maxBytes);
+    console.log("  file:      " + config.CONFIG_FILE);
+    if (d.redacted) console.log("  (凭证已脱敏；如需原值加 --show-secrets)");
+  });
 };
 
 // 从 BaiduPCS-Go search 输出行提取路径（格式: 序号 大小 日期 时间 路径）
@@ -324,10 +352,55 @@ function firstLiteralRun(pattern) {
   return runs.find((r) => r.length >= 2) || runs[0] || null;
 }
 
+// 只保留白名单字段，压缩输出体积（Agent 上下文有限）
+function pickFields(entry, fields) {
+  const out = {};
+  for (const f of fields) if (f in entry) out[f] = entry[f];
+  return out;
+}
+
+// 人类可读的条目表格
+function printEntries(entries) {
+  if (!entries.length) {
+    console.log("(无结果)");
+    return;
+  }
+  console.log("  #    SIZE        MODIFIED             PATH");
+  entries.forEach((e) => {
+    console.log(
+      "  " + String(e.index).padEnd(4) +
+      String(e.sizeText || "-").padEnd(12) +
+      String(e.mtimeText || "-").padEnd(21) +
+      e.path
+    );
+  });
+}
+
+cmds.ls = async (args, json) => {
+  const dirPath = args._[0] || "/";
+  const info = pan.lsEntries(dirPath);
+  if (json || args.flags.jsonFile) {
+    emitJson({
+      path: info.path,
+      entries: info.entries,
+      total: info.entries.length,
+      fileCount: info.fileCount,
+      dirCount: info.dirCount,
+      totalText: info.totalText,
+      warning: info.warning,
+    }, args);
+    return;
+  }
+  console.log(info.raw);
+};
+
 cmds.search = async (args, json) => {
   const keyword = args.flags.k || args._[0] || "";
   const searchPath = args.flags.p || "/";
-  if (!keyword) { console.error("Usage: bdp search <keyword> [-p /path] [--regex|--glob|--any-word|--exact]"); process.exit(1); }
+  if (!keyword) {
+    console.error("Usage: bdp search <keyword> [-p /path] [--regex|--glob|--any-word|--exact] [--limit N] [--page N]");
+    process.exit(1);
+  }
 
   // 客户端二次过滤：--regex 正则 / --glob 通配符 / --any-word OR / --exact 整名（缺省=子串，兼容旧行为）
   const mode = args.flags.exact ? "exact" : args.flags.anyWord ? "any" : args.flags.regex ? "regex" : args.flags.glob ? "glob" : null;
@@ -335,34 +408,56 @@ cmds.search = async (args, json) => {
   if (mode === "regex" || mode === "glob") {
     engineKw = firstLiteralRun(keyword);
     if (!engineKw) {
-      console.error(`[ERROR] 模式 ${keyword} 不含任何普通字符，无法搜索`);
+      console.error("[ERROR] 模式 " + keyword + " 不含任何普通字符，无法搜索");
       process.exit(1);
     }
   } else if (mode === "any") {
     engineKw = keyword.split(/\s+/)[0]; // 引擎只搜第一个词，客户端按 OR 过滤
   }
 
-  const raw = pan.search(engineKw, searchPath);
-  let out = raw;
-  if (mode) {
-    const kept = raw.split("\n").filter((line) => {
-      const p = searchPathFromLine(line);
-      if (p === null) return false;
-      if (mode === "glob") {
-        // glob 同时匹配完整路径与文件名（shell 惯例: "玄空*" 命中以玄空开头的文件名）
-        const base = p.includes("/") ? p.slice(p.lastIndexOf("/") + 1) : p;
-        return matchesName(keyword, p, { mode }) || matchesName(keyword, base, { mode });
-      }
-      return matchesName(keyword, p, { mode });
-    });
-    out = kept.join("\n") + (kept.length ? "\n" : "");
-  }
+  const info = pan.searchEntries(keyword, searchPath, {
+    mode: mode || "substring",
+    engineKeyword: engineKw,
+  });
 
-  if (json) {
-    console.log(JSON.stringify({ keyword, engineKeyword: engineKw, path: searchPath, mode: mode || "substring", raw: out }));
-  } else {
-    console.log(out);
+  // 分页/限流：--limit 单页条数（默认 50），--page 页码，--max-results 硬上限。
+  // 全盘 search 可能命中上千条（实测"中医"1842 条 / 515KB），不分页会吃光 Agent 上下文。
+  const limit = args.flags.limit > 0 ? args.flags.limit : 50;
+  const page = args.flags.page > 0 ? args.flags.page : 1;
+  const maxResults = args.flags.maxResults > 0 ? args.flags.maxResults : 0;
+  const startIdx = (page - 1) * limit;
+  let sliced = info.entries.slice(startIdx, startIdx + limit);
+  const totalMatched = info.matched;
+  if (maxResults > 0) {
+    sliced = sliced.slice(0, Math.max(0, maxResults - startIdx));
   }
+  const total = maxResults > 0 ? Math.min(totalMatched, maxResults) : totalMatched;
+  const hasMore = startIdx + sliced.length < totalMatched;
+
+  // --fields 白名单：只返回需要的字段
+  const fields = args.flags.fields && args.flags.fields.length ? args.flags.fields : null;
+  const entries = fields ? sliced.map((e) => pickFields(e, fields)) : sliced;
+
+  if (json || args.flags.jsonFile) {
+    emitJson({
+      keyword: info.keyword,
+      engineKeyword: info.engineKeyword,
+      path: info.path,
+      mode: info.mode,
+      total,
+      returned: entries.length,
+      page,
+      pageSize: limit,
+      hasMore,
+      nextPage: hasMore ? page + 1 : null,
+      entries,
+      warning: info.warning,
+    }, args);
+    return;
+  }
+  printEntries(entries);
+  console.log("");
+  console.log("共 " + total + " 条，返回 " + entries.length + " 条" + (hasMore ? "（还有更多，用 --page " + (page + 1) + " 继续）" : ""));
 };
 
 cmds.cat = async (args, json) => {
@@ -505,25 +600,71 @@ cmds.put = async (args, json) => {
     return;
   }
   const raw = pan.upload(local, remote);
-  output({ local, remote, raw }, json, () => console.log(raw));
+  output({ local, remote, ok: true, raw }, json, () => console.log(raw));
 };
 
 cmds.mkdir = async (args, json) => {
   const dirPath = args._[0];
   if (!dirPath) { console.error("Usage: bdp mkdir <path>"); process.exit(1); }
-  const raw = pan.mkdir(dirPath);
-  output({ path: dirPath, raw }, json, () => console.log(raw));
+  const r = pan.mkdir(dirPath);
+  if (json || args.flags.jsonFile) {
+    emitJson({ path: r.path, created: r.created, exists: r.exists }, args);
+    return;
+  }
+  console.log(r.created ? "✅ 目录已创建: " + r.path : "ℹ️  目录已存在: " + r.path);
 };
 
 cmds.rm = async (args, json) => {
-  const filePath = args._[0];
-  if (!filePath) { console.error("Usage: bdp rm <path>"); process.exit(1); }
+  const paths = args._;
+  if (paths.length === 0) {
+    console.error("Usage: bdp rm <path> [path2 ...] [--yes]");
+    process.exit(1);
+  }
   if (args.flags.dryRun) {
-    console.log(`[dry-run] 将删除 ${filePath}`);
+    if (json || args.flags.jsonFile) {
+      emitJson({ dryRun: true, paths }, args);
+      return;
+    }
+    paths.forEach((p) => console.log("[dry-run] 将删除 " + p));
     return;
   }
-  const raw = pan.remove(filePath);
-  output({ path: filePath, raw }, json, () => console.log(raw));
+  // 高危操作：非交互环境（Agent/管道）必须显式 --yes，避免误删无确认。
+  // 交互式终端则弹 y/N 确认。
+  if (!args.flags.yes) {
+    if (process.stdin.isTTY) {
+      const readline = require("readline");
+      const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+      const answer = await new Promise((resolve) => rl.question("确认删除 " + paths.length + " 个路径? [y/N] ", resolve));
+      rl.close();
+      if (!/^y(es)?$/i.test(String(answer).trim())) {
+        console.error("[ERROR] 已取消删除");
+        return 1;
+      }
+    } else {
+      const msg = "删除是高危操作，需要显式确认：请加 --yes（或先 --dry-run 预览）";
+      if (json || args.flags.jsonFile) {
+        emitJson({ error: msg, requiresConfirmation: true, paths }, args);
+      } else {
+        console.error("[ERROR] " + msg);
+      }
+      return 1;
+    }
+  }
+  const results = pan.remove(paths);
+  const failed = results.filter((r) => !r.ok);
+  if (json || args.flags.jsonFile) {
+    emitJson({
+      results,
+      deleted: results.length - failed.length,
+      failed: failed.length,
+    }, args);
+  } else {
+    results.forEach((r) => {
+      if (r.ok) console.log("✅ 已删除 " + r.path);
+      else console.error("❌ 删除失败 " + r.path + ": " + r.error);
+    });
+  }
+  return failed.length > 0 ? 1 : 0;
 };
 
 // ── Pan 扩展命令（BaiduPCS-Go 引擎封装）───────────────
@@ -540,20 +681,30 @@ cmds.quota = async (args, json) => {
 
 cmds.du = async (args, json) => {
   const dirPath = args._[0] || "/";
-  verboseLog(args, `du ${dirPath} depth=${args.flags.depth || 3} concurrency=${args.flags.concurrency || 8} top=${args.flags.top || 15}`);
+  verboseLog(args, "du " + dirPath + " depth=" + (args.flags.depth || 3) + " concurrency=" + (args.flags.concurrency || 8) + " top=" + (args.flags.top || 15));
   const result = await pan.du(dirPath, {
     depth: args.flags.depth,
     concurrency: args.flags.concurrency,
     top: args.flags.top,
+    onProgress: args.flags.progress ? (p) => {
+      process.stderr.write("[du] 已扫描 " + p.scannedDirs + " 目录 / " + p.files + " 文件 / 队列 " + p.pending + " / " + (p.elapsedMs / 1000).toFixed(1) + "s\n");
+    } : undefined,
   });
   if (json || args.flags.jsonFile) {
     emitJson(result, args);
     return;
   }
-  console.log(`${formatSize(result.size)}  ${result.path}  (${result.files} 文件 / ${result.dirs} 子目录${result.truncated ? " / 仅显示前" + (args.flags.top || 15) + "项" : ""}${result.failed ? ` / ${result.failed} 目录读取失败` : ""}  ${(result.elapsedMs / 1000).toFixed(1)}s)`);
+  console.log(formatSize(result.size) + "  " + result.path + "  (" + result.files + " 文件 / " + result.dirs + " 子目录" +
+    (result.truncated ? " / 仅显示前" + (args.flags.top || 15) + "项" : "") +
+    (result.failed ? " / " + result.failed + " 目录读取失败" : "") +
+    "  " + (result.elapsedMs / 1000).toFixed(1) + "s)");
+  if (result.partial) {
+    console.log("⚠️  深度封顶（上限 " + result.depthLimit + "）→ size 不完整；实际占用以 bdp quota 为准，可加大 --depth");
+  }
   console.log("");
   result.children.forEach((c) => {
-    console.log(`  ${formatSize(c.size).padStart(10)}  ${c.path}${c.capped ? "  [深度封顶]" : ""}`);
+    console.log("  " + formatSize(c.size).padStart(10) + "  " + c.path +
+      (c.capped ? "  [深度封顶]" : "") + (c.partial && !c.capped ? "  [子树未扫全]" : ""));
   });
 };
 
@@ -642,9 +793,9 @@ cmds.share = async (args, json) => {
     if (json || args.flags.jsonFile) emitJson(results, args);
     else results.forEach((r) => console.log(`✅ 已取消分享 ${r.shareId}`));
   } else if (action === "list") {
-    const r = pcsExtra.shareList(args.flags.page || 1);
+    const r = await pcsExtra.shareListSafe(args.flags.page || 1);
     output(r, json, (d) => {
-      console.log(`${d.count} 个分享:`);
+      console.log(`${d.count} 个分享（来源: ${d.source || "engine"}${d.total ? " / 共 " + d.total : ""}）:`);
       d.shares.forEach((s) => {
         console.log(`  [${s.index}] ${s.link}${s.pwd ? `  提取码: ${s.pwd}` : ""}  shareId:${s.shareId}  ${s.expireText || ""}`);
       });
@@ -987,17 +1138,26 @@ const COMMANDS = {
   },
   search: {
     group: "pan",
-    usage: "bdp search <keyword> [-p /path]",
-    desc: "按文件名递归搜索，支持模式过滤",
-    flags: ["k", "p", "regex", "glob", "anyWord", "exact"],
+    usage: "bdp search <keyword> [-p /path] [--limit N] [--page N]",
+    desc: "按文件名递归搜索，支持模式过滤（--json 返回结构化 entries[]）",
+    flags: ["k", "p", "regex", "glob", "anyWord", "exact", "limit", "page", "maxResults", "fields"],
     options: [
-      "-p <dir>      搜索目录 (默认 /)",
-      "--regex       正则模式",
-      "--glob        shell 通配符 (如 玄空*.pdf)",
-      "--any-word    空格分词命中任意一个 (OR)",
-      "--exact       整名精确匹配",
+      "-p <dir>        搜索目录 (默认 /)",
+      "--regex         正则模式",
+      "--glob          shell 通配符 (如 玄空*.pdf)",
+      "--any-word      空格分词命中任意一个 (OR)",
+      "--exact         整名精确匹配",
+      "--limit <N>     单页返回条数 (默认50)",
+      "--page <N>      页码 (默认1)",
+      "--max-results <N>  硬上限，截断总结果数",
+      "--fields <list> 只返回指定字段 (逗号分隔, 如 path,size,mtime)",
     ],
-    examples: ['bdp search "报告"', 'bdp search "玄空*.pdf" --glob', 'bdp search "玄空.+pdf$" --regex --json'],
+    examples: [
+      'bdp search "报告"',
+      'bdp search "玄空*.pdf" --glob',
+      'bdp search "玄空.+pdf$" --regex --json',
+      'bdp search "报告" --limit 20 --fields path,size,mtime --json',
+    ],
   },
   cat: {
     group: "pan",
@@ -1076,12 +1236,12 @@ const COMMANDS = {
   },
   rm: {
     group: "pan",
-    usage: "bdp rm <path>",
-    desc: "删除文件/目录",
-    flags: ["dryRun"],
-    note: "⚠️ 高危操作，Agent 使用前必须用户确认",
-    options: ["--dry-run 模拟"],
-    examples: ["bdp rm /临时文件.txt"],
+    usage: "bdp rm <path> [path2 ...] [--yes]",
+    desc: "删除文件/目录（支持批量）",
+    flags: ["dryRun", "yes"],
+    note: "⚠️ 高危操作。非交互环境（Agent/管道）必须显式 --yes；交互终端会弹 y/N 确认",
+    options: ["--dry-run 模拟", "--yes 跳过确认直接删除（非交互环境必需）"],
+    examples: ["bdp rm /临时文件.txt --yes", "bdp rm /a.txt /b.txt --dry-run"],
   },
   mv: {
     group: "pan",
@@ -1108,11 +1268,13 @@ const COMMANDS = {
     group: "pan",
     usage: "bdp du [path]",
     desc: "目录容量分析（递归统计，找空间大户）",
-    flags: ["depth", "top", "concurrency"],
+    flags: ["depth", "top", "concurrency", "progress"],
+    note: "深度上限 8；超出时 size 不完整（返回值 partial=true），实际占用以 bdp quota 为准",
     options: [
-      "--depth <N>        递归深度 (默认3)",
+      "--depth <N>        递归深度 (默认3, 上限8)",
       "--top <N>          显示最大的 N 个子目录 (默认15)",
       "--concurrency <N>  并发扫描数 (默认8)",
+      "--progress         stderr 实时输出扫描进度",
     ],
     examples: ["bdp du /", "bdp du /玄学 --depth 4 --top 20", "bdp du / --json"],
   },
@@ -1138,7 +1300,7 @@ const COMMANDS = {
     usage: "bdp share set <path> [--pwd P] | bdp share cancel <id>... | bdp share list",
     desc: "分享管理（创建/取消/列出）",
     flags: ["pwd", "combined", "page"],
-    note: "share list 受 BaiduPCS-Go v4.0.1 引擎 bug 限制（panic），用 share cancel 管理已知分享",
+    note: "share list 走网页 API（BaiduPCS-Go v4.0.1 引擎的 share list 有 panic bug，网页 API 正常）",
     options: ["--pwd <P>    提取码", "--combined  输出带提取码的链接"],
     examples: ["bdp share set /文档/报告.pdf --pwd 1234 --combined", "bdp share cancel 23220383577"],
   },
@@ -1249,10 +1411,11 @@ const COMMANDS = {
   },
   config: {
     group: "config",
-    usage: "bdp config",
-    desc: "查看配置",
-    flags: [],
-    examples: ["bdp config"],
+    usage: "bdp config [--show-secrets]",
+    desc: "查看配置（凭证默认脱敏）",
+    flags: ["showSecrets"],
+    note: "BDUSS/STOKEN 默认脱敏显示；--show-secrets 才输出原值",
+    examples: ["bdp config", "bdp config --json"],
   },
   profile: {
     group: "config",
@@ -1261,6 +1424,16 @@ const COMMANDS = {
     flags: [],
     note: "也可用全局参数 --profile <name> 切换（命令前/后均可）",
     examples: ["bdp --profile svip login", "bdp profile list"],
+  },
+  serve: {
+    group: "config",
+    usage: "bdp serve --mcp",
+    desc: "启动 MCP 服务器（stdio 传输，工具可被 Agent 客户端自动发现）",
+    flags: ["mcp"],
+    options: [
+      "--mcp  以 MCP 服务器模式启动",
+    ],
+    examples: ["bdp serve --mcp"],
   },
   help: {
     group: "config",
@@ -1388,6 +1561,26 @@ cmds.help = async (args, json) => {
 };
 
 
+// ── MCP 服务器 ─────────────────────────────────────────────
+
+cmds.serve = async (args, json) => {
+  const { startServer, SERVER_NAME, SERVER_VERSION } = require("../lib/mcp");
+  if (json || args.flags.jsonFile) {
+    emitJson({ mode: "mcp", server: SERVER_NAME, version: SERVER_VERSION, transport: "stdio" }, args);
+    return;
+  }
+  if (!args.flags.mcp) {
+    console.error("Usage: bdp serve --mcp   （启动 MCP 服务器，stdio 传输）");
+    process.exit(1);
+  }
+  process.stderr.write("[bdp serve] MCP 服务器已启动（stdio, JSON-RPC 2.0）\n");
+  startServer();
+  // stdio 服务器常驻，直到 stdin 关闭
+  await new Promise(() => {});
+};
+
+// ── Main ───────────────────────────────────────────────
+
 async function main() {
   // Windows 控制台编码兜底：TTY 且非 UTF-8 代码页时切换 chcp 65001（幂等、静默失败）
   ensureUtf8Console();
@@ -1413,14 +1606,14 @@ async function main() {
     try {
       config.useProfile(profile);
     } catch (e) {
-      console.error(`[ERROR] ${e.message}`);
+      console.error("[ERROR] " + e.message);
       process.exit(1);
     }
   }
 
   const handler = cmds[command];
   if (!handler) {
-    if (command) console.error(`[ERROR] 未知命令: ${command}（用 bdp help 查看全部命令，bdp help <命令> 查看用法）`);
+    if (command) console.error("[ERROR] 未知命令: " + command + "（用 bdp help 查看全部命令，bdp help <命令> 查看用法）");
     console.log(HELP);
     process.exit(command ? 1 : 0);
   }
@@ -1428,18 +1621,20 @@ async function main() {
   // 防呆：未知选项立即报错（避免 agent 拼错参数被静默忽略）
   const unknownFlags = validateFlags(command, args.flags, COMMANDS[command]);
   if (unknownFlags.length > 0) {
-    console.error(`[ERROR] 命令 ${command} 不支持选项: --${unknownFlags.join(", --")}（bdp help ${command} 查看合法选项）`);
+    console.error("[ERROR] 命令 " + command + " 不支持选项: --" + unknownFlags.join(", --") + "（bdp help " + command + " 查看合法选项）");
     process.exit(1);
   }
 
   let exitCode = 0;
   try {
-    await handler(args, json);
+    // handler 可以返回数字作为退出码（用于"部分失败"场景，如 rm 批量删除）
+    const rc = await handler(args, json);
+    if (typeof rc === "number" && rc !== 0) exitCode = rc;
   } catch (e) {
     if (json) {
       console.log(JSON.stringify({ error: e.message, ...(e.errno !== undefined ? { errno: e.errno } : {}) }));
     } else {
-      console.error(`[ERROR] ${e.message}`);
+      console.error("[ERROR] " + e.message);
     }
     exitCode = 1;
   } finally {
