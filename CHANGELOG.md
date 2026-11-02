@@ -103,7 +103,9 @@
 ### 📦 分发
 
 - 重新构建 `baiduwangpan-skill.zip`（40,873 字节 / 8 个文件）。
-- **npm 上仍为 1.10.2**。v1.11.x 都还没发，首次发布将带上这一版。
+- **已发布到 npm：`baiduwangpan-cli@1.11.3`**（2026-11-03）。
+  `npm view baiduwangpan-cli version --prefer-online` → `1.11.3`；并已从 registry 装到干净目录实跑验证。
+- v1.11.0 / v1.11.1 / v1.11.2 是**未发布**的开发 tag，首次对外发布即本版。
 
 ---
 
