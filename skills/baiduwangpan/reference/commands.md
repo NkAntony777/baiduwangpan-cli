@@ -213,6 +213,38 @@ bdp dedup /med --top 50
 bdp dedup /med --remove-duplicates --dry-run
 ```
 
+
+**`--keep` 策略的坑**（重要）：
+
+| 取值 | 行为 | 风险 |
+|:-----|:-----|:-----|
+| `shortest`（默认） | 保留路径字符串最短的 | **可能删错** —— 短路径常是自动汇总的副本，用户手动归档的原件往往在深目录 |
+| `oldest` / `newest` | 保留修改时间最早/最新的 | 文件时间被改过时可能不符合预期 |
+| 完整路径（如 `--keep /重要/资料.pdf`） | 保留该簇里指定的那份 | 路径不在簇内时回退到 `shortest` |
+
+> 知道要保留哪份时**务必显式给路径**，不要依赖默认策略。
+> 删除前先 `--dry-run` 看完整清单。
+
+**扫描完整性**：命令会如实报告扫描是否完整 ——
+`partial=true` 表示扫描不完整（目录分页达上限 / 有畸形条目），
+此时结果可能漏报重复文件。`noMd5` 表示有多少文件百度没返回 md5（无法参与精算）。
+
+### 性能：并发模式
+
+```
+# 默认 curl 传输（每次请求 fork 一个 curl 进程，串行）
+bdp dedup /med --concurrency 8
+
+# native 传输（Node 内置 fetch，异步真并发 + keep-alive 连接复用）
+bdp config --set webTransport native
+bdp dedup /med --concurrency 8
+```
+
+> **为什么有 native 模式**：curl 版用 `spawnSync` 同步起进程，**会阻塞事件循环** ——
+> 于是 `--concurrency` 参数实际上是假的（实测 8 worker 与 1 worker 耗时相同）。
+> `native` 模式改用 Node 内置 `fetch`，并发才真正生效（实测全盘扫描提速约 1.3×）。
+> 两种模式结果一致，可随时用 `bdp config --set webTransport curl` 切回。
+
 ### index / ask — 本地全文索引与检索
 
 ```

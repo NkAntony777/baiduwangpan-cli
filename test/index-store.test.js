@@ -11,10 +11,14 @@ function tmpDb() {
   return path.join(dir, "test.db");
 }
 
-test("tokenize: 中文切二元组", () => {
-  assert.equal(store.tokenize("风水"), "风水");
-  assert.equal(store.tokenize("倪海厦"), "倪海 海厦");
-  assert.equal(store.tokenize("中医知识"), "中医 医知 知识");
+test("tokenize: 中文切二元组 + 单字（单字用于支持「药」「气」这类查询）", () => {
+  assert.equal(store.tokenize("风水"), "风水 风 水");
+  assert.equal(store.tokenize("倪海厦"), "倪海 海厦 倪 海 厦");
+  assert.equal(store.tokenize("中医知识"), "中医 医知 知识 中 医 知 识");
+});
+
+test("tokenize: 可选关闭单字 token", () => {
+  assert.equal(store.tokenize("风水", { includeSingle: false }), "风水");
 });
 
 test("tokenize: 单字中文保留", () => {
@@ -23,11 +27,11 @@ test("tokenize: 单字中文保留", () => {
 
 test("tokenize: 拉丁词小写并保留", () => {
   assert.equal(store.tokenize("Hello World"), "hello world");
-  assert.equal(store.tokenize("GPT-4 模型"), "gpt 4 模型");
+  assert.equal(store.tokenize("GPT-4 模型"), "gpt 4 模型 模 型");
 });
 
 test("tokenize: 标点被丢弃", () => {
-  assert.equal(store.tokenize("你好，世界！"), "你好 世界");
+  assert.equal(store.tokenize("你好，世界！"), "你好 世界 你 好 世 界");
 });
 
 test("buildMatchQuery: 生成带引号的 FTS5 表达式", () => {
@@ -98,6 +102,34 @@ test("索引: 两字中文查询也能命中（unicode61 分词器的已知陷�
   }
 });
 
+test("索引: 单字中文查询能命中（二元分词的固有盲区）", () => {
+  dbPath = tmpDb();
+  const h = store.openIndex(dbPath);
+  try {
+    // 「元气充足」按二元组会切成 [元气,气充,充足]，单字「气」本应查不到
+    store.upsertFile(h, { path: "/a.txt", name: "a.txt", content: "元气充足" });
+    const hits = store.search(h, "气", { limit: 5 });
+    assert.equal(hits.length, 1, "单字查询应命中");
+  } finally {
+    h.close();
+  }
+});
+
+test("索引: 单字查询不影响多字查询的精度", () => {
+  dbPath = tmpDb();
+  const h = store.openIndex(dbPath);
+  try {
+    store.upsertFile(h, { path: "/a.txt", name: "a.txt", content: "风水古籍" });
+    store.upsertFile(h, { path: "/b.txt", name: "b.txt", content: "中医书籍" });
+    // 「风水」应只命中 a，不应因单字 token 而命中 b
+    const hits = store.search(h, "风水", { limit: 5 });
+    assert.equal(hits.length, 1);
+    assert.equal(hits[0].path, "/a.txt");
+  } finally {
+    h.close();
+  }
+});
+
 test("索引: 更新同一路径不产生重复行", () => {
   dbPath = tmpDb();
   const h = store.openIndex(dbPath);
@@ -130,7 +162,7 @@ test("索引: needsReindex 依据 md5/size 判定", () => {
   dbPath = tmpDb();
   const h = store.openIndex(dbPath);
   try {
-    store.upsertFile(h, { path: "/a.txt", name: "a.txt", size: 10, md5: "m1", mtime: 1000, content: "x" });
+    store.upsertFile(h, { path: "/a.txt", name: "a.txt", size: 10, md5: "m1", mtime: 1000, content: "/a.txt\\nx" });
     assert.equal(store.needsReindex(h, { path: "/a.txt", size: 10, md5: "m1", mtime: 1000 }), false);
     assert.equal(store.needsReindex(h, { path: "/a.txt", size: 11, md5: "m1", mtime: 1000 }), true);
     assert.equal(store.needsReindex(h, { path: "/a.txt", size: 10, md5: "m2", mtime: 1000 }), true);
@@ -145,7 +177,7 @@ test("索引: md5 缺失时退化为 size+mtime 判定（否则内容变化会�
   const h = store.openIndex(dbPath);
   try {
     // 百度未返回 md5 的文件：空字符串
-    store.upsertFile(h, { path: "/a.txt", name: "a.txt", size: 10, md5: "", mtime: 1000, content: "旧" });
+    store.upsertFile(h, { path: "/a.txt", name: "a.txt", size: 10, md5: "", mtime: 1000, content: "/a.txt\\n旧" });
     // mtime 变了 → 必须重建
     assert.equal(store.needsReindex(h, { path: "/a.txt", size: 10, md5: "", mtime: 2000 }), true);
     // size 变了 → 必须重建
