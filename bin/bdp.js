@@ -296,6 +296,9 @@ function parseArgs(argv) {
     } else if (/^-\d/.test(arg)) {
       // 负数按位置参数处理（如 bdp error -3）
       opts._.push(arg);
+    } else if (arg === "-") {
+      // 单个连字符：既不是选项也不是负数 → 当位置参数（如 bdp error -）
+      opts._.push(arg);
     } else if (arg.startsWith("-")) {
       opts.flags[arg.replace(/^-+/, "")] = true;
     } else {
@@ -1426,11 +1429,15 @@ cmds.cache = async (args, json) => {
 };
 
 cmds.error = async (args, json) => {
-  const code = args._[0] || "-3";
+  // 用 nullish 判断而不是 `||`：空串要当「未登记的错误码」，
+  // 不能静默变成 -3（否则与 MCP 侧（nullish 判断）口径不一致）
+  const code = args._[0] === undefined ? "-3" : args._[0];
   // 错误码表已抽到 lib/error-codes.js —— CLI 与 MCP 的 bdp_error 共用同一份结构
   const errorCodes = require("../lib/error-codes");
+  // 分层：默认只给「结论」（description + action），--verbose 才附带内部实现细节
+  const verbose = !!args.flags.verbose;
   if (args._[1] === "--list" || args.flags.list) {
-    const list = errorCodes.listErrors();
+    const list = errorCodes.listErrors({ verbose });
     if (args.flags.jsonFile || json) {
       emitJson({ count: list.length, errors: list }, args);
     } else {
@@ -1438,14 +1445,21 @@ cmds.error = async (args, json) => {
       for (const e of list) {
         console.log("  " + String(e.code).padStart(7) + "  " + e.severity.padEnd(11) + "  " + e.name);
       }
+      if (verbose) {
+        console.log("");
+        console.log("内部细节：");
+        for (const e of list) {
+          console.log("  " + String(e.code).padStart(7) + "  " + (e.internalDetail || ""));
+        }
+      }
     }
     return;
   }
-  const info = errorCodes.describeError(code);
+  const info = errorCodes.describeError(code, { verbose });
   if (args.flags.jsonFile || json) {
     emitJson(info, args);
   } else {
-    console.log(errorCodes.explainError(code));
+    console.log(errorCodes.explainError(code, { verbose }));
   }
 };
 
@@ -2077,12 +2091,19 @@ const COMMANDS = {
     examples: ["bdp cache", "bdp cache clear"],
   },
   error: {
-    group: "group",
-    usage: "bdp error <code> | bdp error --list",
-    desc: "解释错误码（--json 返回结构化错误码：code/name/severity/retryable/action）",
+    // 错误码释义是通用工具，不属于群聊 —— 放在 config 组。
+    // （此前归在 "group"，bdp help 会把它列在「GROUP CHAT OPERATIONS (群聊)」下面，
+    //  按分组找命令的人根本不会去群聊里找「错误码释义」。）
+    group: "config",
+    usage: "bdp error [<code>] | bdp error --list",
+    desc: "解释错误码（--json 返回 code/name/description/severity/retryable/action；--verbose 附带 internalDetail）",
+    note: "不填 <code> 时默认解释 -3；--verbose 会附带 internalDetail（实测记录/实现坑），默认不下发。",
     flags: ["list"],
-    options: ["--list       列出全部已知错误码"],
-    examples: ["bdp error -3", "bdp error 31326 --json", "bdp error --list --json"],
+    options: [
+      "--list       列出全部已知错误码",
+      "--verbose    附带内部实现细节（实测记录/实现坑），默认不下发",
+    ],
+    examples: ["bdp error -3", "bdp error 31326 --json", "bdp error --list --json", "bdp error 31066 --json --verbose"],
   },
   login: {
     group: "config",
@@ -2163,7 +2184,7 @@ const GLOBAL_OPTIONS = [
   "--json              JSON 结构化输出 (Agent 友好)",
   "--json-file <path>  JSON 写入文件 (UTF-8, 绕开控制台编码)",
   "--legacy-json       输出裸数组 (gls/gsearch legacy)",
-  "--verbose           进度/日志只写 stderr",
+  "--verbose           进度/日志只写 stderr（bdp error：附带 internalDetail）",
   "--no-meta           关闭统一响应信封 (--json 输出不带 meta)",
 ];
 
@@ -2228,7 +2249,7 @@ const GLOBAL_FLAGS = ['json', 'jsonFile', 'legacyJson', 'verbose', 'profile', 'n
 function validateFlags(command, flags, cmdMeta) {
   if (!cmdMeta) return [];
   const allowed = new Set(GLOBAL_FLAGS.concat(cmdMeta.flags || []));
-  return Object.keys(flags).filter((f) => !allowed.has(f));
+  return Object.keys(flags).filter((f) => f !== "" && !allowed.has(f));
 }
 
 const HELP = buildHelp();
@@ -2345,19 +2366,49 @@ async function main() {
   ensureUtf8Console();
 
   const argv = process.argv.slice(2);
-  // 全局 --profile：支持 `bdp --profile <name> <cmd>`（命令前）或 `bdp <cmd> --profile <name>`（命令后）
+  // 全局选项的位置自由度：
+  //   bdp --profile <name> <cmd>    bdp <cmd> --profile <name>
+  //   bdp --json ls                 bdp --verbose error -3
+  //   bdp --json --profile x ls     （布尔开关与带值选项可任意交错）
+  //
+  // 为什么循环解析：布尔开关与带值选项会互相打断（--profile x --json ls / --json --profile x ls），
+  // 单趟扫描只能吃掉开头连续的那一段，后面出现的全局选项就会被当成「命令名」。
   let rest = argv;
   let profileName;
-  if (argv[0] === "--profile") {
-    profileName = argv[1];
-    rest = argv.slice(2);
-  } else if (argv[0] && argv[0].startsWith("--profile=")) {
-    profileName = argv[0].slice("--profile=".length);
-    rest = argv.slice(1);
-  }
-  // 全局选项也允许放在命令之前（bdp --no-meta ls --json）
+  const PRE_COMMAND_BOOLEAN_FLAGS = new Set(["--no-meta", "--verbose", "--json", "--legacy-json"]);
   const preCommandFlags = [];
-  while (rest.length > 0 && rest[0] === "--no-meta") preCommandFlags.push(rest.shift());
+  let absorbed = true;
+  while (absorbed) {
+    absorbed = false;
+    while (rest.length > 0 && PRE_COMMAND_BOOLEAN_FLAGS.has(rest[0])) {
+      preCommandFlags.push(rest.shift());
+      absorbed = true;
+    }
+    if (rest[0] === "--profile" || (rest[0] && rest[0].startsWith("--profile="))) {
+      const isEq = rest[0].startsWith("--profile=");
+      const val = isEq ? rest[0].slice("--profile=".length) : rest[1];
+      // 值不像 profile 名（缺失 / 空 / 以 -- 开头）→ **明确报错**。
+      // 否则 `bdp --profile --json error -3` 会把 "--json" 当成 profile 名，
+      // 在用户配置里建出一个叫 "--json" 的垃圾 profile 并激活它（实测确认过）。
+      if (val === undefined || val === "" || val.startsWith("--")) {
+        const msg = "--profile 需要一个 profile 名（用 bdp profile list 查看已有的 profile）";
+        if (preCommandFlags.includes("--json")) {
+          console.log(JSON.stringify(withMeta({ error: msg }, jsonCtx), null, 2));
+        } else {
+          console.error("[ERROR] " + msg);
+        }
+        process.exit(1);
+      }
+      profileName = val;
+      rest = isEq ? rest.slice(1) : rest.slice(2);
+      absorbed = true;
+    }
+    if (rest[0] === "--json-file" && !preCommandFlags.includes("--json-file")) {
+      preCommandFlags.push("--json-file", rest[1]);
+      rest = rest.slice(2);
+      absorbed = true;
+    }
+  }
 
   const command = rest[0];
   const args = parseArgs(rest.slice(1).concat(preCommandFlags));
@@ -2392,9 +2443,23 @@ async function main() {
 
   const handler = cmds[command];
   if (!handler) {
-    if (command) console.error("[ERROR] 未知命令: " + command + "（用 bdp help 查看全部命令，bdp help <命令> 查看用法）");
+    if (command) {
+      console.error("[ERROR] 未知命令: " + command + "（用 bdp help 查看全部命令，bdp help <命令> 查看用法）");
+      console.log(HELP);
+      process.exit(1);
+    }
+    // 只给了全局开关却没给命令 → **必须报错**（退出码 1）。
+    // 否则 Agent 会拿到「退出码 0 + 纯文本帮助」：既像成功、又无法 JSON.parse，诊断线索全丢
+    // —— 比直接报「未知命令」更糟。（裸跑 bdp 无参数仍保持「打印 HELP + 退出 0」的惯例）
+    if (preCommandFlags.length > 0) {
+      const msg =
+        "缺少命令（只给了全局选项: " + preCommandFlags.join(" ") + "）。用 bdp help 查看全部命令。";
+      if (args.flags.json) emitJson({ error: msg }, args);
+      else console.error("[ERROR] " + msg);
+      process.exit(1);
+    }
     console.log(HELP);
-    process.exit(command ? 1 : 0);
+    process.exit(0);
   }
 
   // 防呆：未知选项立即报错（避免 agent 拼错参数被静默忽略）
@@ -2414,7 +2479,8 @@ async function main() {
       // 失败路径也要带信封 + 结构化错误码 —— Agent 在最需要诊断的时候不能拿不到这些
       const errorCodes = require("../lib/error-codes");
       const hasErrno = e && e.errno !== undefined && e.errno !== null;
-      const info = hasErrno ? errorCodes.describeError(e.errno) : null;
+      // 失败路径同样分层：默认只给结论，--verbose 才附带内部细节
+      const info = hasErrno ? errorCodes.describeError(e.errno, { verbose: !!args.flags.verbose }) : null;
       emitJson(
         Object.assign(
           { error: e && e.message ? e.message : String(e) },

@@ -69,7 +69,7 @@
 | 群目录树 | `bdp gtree <gid>` | BFS 构建目录树 |
 | 群缓存管理 | `bdp cache [clear]` | 查看 / 清空会话缓存 |
 | 列出我的分享 | `bdp share list` | 网页 API，绕过引擎 panic bug |
-| 错误码释义 | `bdp error -3 [--json]` | 内置错误码字典（`--json` 返回结构化：code/codeText/name/description/severity/retryable/action） |
+| 错误码释义 | `bdp error -3 [--json]` | 内置错误码字典（`--json` 返回结构化：code/codeText/name/description/severity/retryable/action；`--verbose` 附带 internalDetail） |
 | **MCP 服务器** | `bdp serve --mcp [--http]` | stdio 或 HTTP 传输，19 个带 schema 的工具（含写操作） |
 
 ## 🚀 快速开始
@@ -153,6 +153,13 @@ bdp gdownload 539478953581833690 954615608563687 -o ./downloads
 | **缺参数不再污染网盘** | `bdp_mkdir {}` 曾会真的建出名为 `undefined` 的目录；现统一报 user-error |
 | **`--no-meta` 位置自由** | `bdp --no-meta ls` 此前报「未知命令」 |
 | **参数错误不再让你提 Issue** | 新增 `-32001 TOOL_ARGUMENT_ERROR`（`severity: user-error`） |
+
+## 🆕 v1.9.2 新增（错误码分层）
+
+| 改进 | 说明 |
+|:-----|:-----|
+| **结论与内部细节分层** | 每条错误码拆成 `description`（结论）与 `internalDetail`（实测记录/实现坑）。**默认只下发结论**；CLI `--verbose` / MCP `{"verbose":true}` 才给内部细节 |
+| **全局开关位置自由** | `bdp --verbose error -3` 此前报「未知命令」；现 `--json`/`--verbose`/`--no-meta`/`--legacy-json` 均支持前置换 |
 
 ## 🆕 v1.9.0 新增（统一响应信封 + 结构化错误码）
 
@@ -313,7 +320,7 @@ bdp error --list [--json]       列出全部已知错误码
 ```
 --json                           JSON 结构化输出 (Agent 友好)
 --json-file <path>               JSON 写入文件 (UTF-8, 绕开控制台编码)
---verbose                        进度/日志只写 stderr
+--verbose                        进度/日志只写 stderr（bdp error：附带 internalDetail）
 -n <N>                           行数 (head/tail, 默认 20)
 -p <path>                        搜索路径 (search, 默认 /)
 -i                               忽略大小写 (grep)

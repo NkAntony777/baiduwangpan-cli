@@ -2,7 +2,80 @@
 
 本文件记录 baiduwangpan-cli 的显著变更。版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
----
+-----
+
+## v1.9.2 — 2026-11-02
+
+> 主题：**错误码分层** —— 把「结论」与「内部实现细节」拆开，默认只下发结论。
+> 本版全部改动都来自 4 路子代理审核（正确性 / 安全泄漏 / 文档对拍 / 边界穷举）。
+
+### 🆕 新增
+
+- **`internalDetail` 分层**：`lib/error-codes.js` 的每条错误码拆成两部分 ——
+  `description`（结论：一句话说清这是什么错）与 `internalDetail`（内部细节：实测记录、实现坑、排查线索）。
+  **默认只下发结论**，需要深挖时显式要：
+  - CLI：`bdp error <code> --json --verbose`、`bdp error --list --json --verbose`
+  - MCP：`bdp_error {"code":"31066","verbose":true}`
+  人类可读输出同理：默认不含「内部细节」段，`--verbose` 才追加。
+  理由：Agent 的上下文是最稀缺的资源。13 条错误码的内部细节全展开约 1.5 KB
+  （整表 3.9 KB → 5.7 KB；默认路径省下 26%，单条 300 B → 228 B），
+  而 Agent 一次通常只碰 1 条 —— 默认全量下发等于每次都白付这份上下文。
+- **全局选项位置自由度扩大**：布尔全局开关（`--json` / `--verbose` / `--no-meta` / `--legacy-json`）
+  与带值全局选项（`--profile` / `--json-file`）现在都能放在命令之前，且可任意交错
+  （`bdp --json --profile x error -3` / `bdp --profile x --json error -3` 都可用）。
+  此前只有 `--no-meta` 支持前置换，其余全局选项放在命令前会被当成「命令名」。
+- **`lib/flags.js`（新模块）**：布尔参数判定的**唯一来源**（`toBool` / `parseBool`），
+  CLI 与 MCP 共用，避免同一语义在两层漂移。
+
+### 🔧 修复
+
+- **错误码查表被宽松正则误伤**（审核发现，既有缺陷）：
+  `lookup()` 用 `/-?\d+/` 从任意字符串里抽数字，于是 `"abc31066"`、`"pid=2"`、`"v2"`
+  会被判成已知错误码 —— 给 Agent 一个**错误的确定性结论**（"errno=2 → 群文件请走 gdownload"），
+  这比返回 UNKNOWN 更危险。现在只接受 `errno=31066` / `errno = -3` 这两种明确形态。
+- **控制字符输入被误判成另一个错误码**：`"\e[2J\e[H31066"` 里的 `2` 被当成 errno=2，
+  而 `codeText` 却显示净化后的原文，两者自相矛盾。现在查表用**净化后**的文本。
+- **库层与 MCP 层的布尔口径分叉**（本轮新引入）：库层用真值判断（`!!opts.verbose`），
+  MCP 层用窄化三元组 —— 结果 `"false"` 在库层被当成 **true**（反而开启了 internalDetail）。
+  现在两层同源（`lib/flags.js`）。
+- **MCP 的 `list`/`verbose` 静默降级**：`{"list":"1"}` 曾被当成「不列清单」、
+  `{"verbose":"1"}` 曾静默失效 —— Agent 会以为参数生效了。
+  现在布尔参数**严格解析**：`"1"` 正常生效，无法识别的值报 `-32001`（而不是假装生效）。
+- **只给全局选项不给命令时退出码 0 + 非 JSON 输出**：`bdp --json` 此前打印纯文本帮助并返回 0，
+  Agent 既无法 `JSON.parse`、又没有诊断线索。现在明确报「缺少命令」并退出 1
+  （`--json` 下返回 JSON 错误）。裸跑 `bdp`（无参数）仍保持「打印帮助 + 退出 0」。
+- **带值的全局选项前置换后被当成命令名**：`bdp --json --profile x error -3` 曾报「未知命令: --profile」。
+- **CLI 与 MCP 的空串错误码口径不一致**：CLI 的 `args._[0] || "-3"` 把空串当成「没给」，
+  MCP 的 nullish 判断却当成「未登记」。现在 CLI 也用 nullish 判断。
+- **单个 `-` 被报成「不支持选项」**：`bdp error -` 现在按位置参数处理。
+- **错误消息无界回显**（本轮新引入）：`lib/flags.js` 把无法识别的布尔值原样拼进错误消息，
+  10 万字符的入参会整段灌进 Agent 上下文。现在回显限长 80 字符并剔除控制字符；
+  `buildToolError` 另加 1000 字符上限兜底（引擎原文也可能很长）。
+- **`--profile` 取值不校验会建出垃圾 profile**（既有缺陷）：`bdp --profile --json error -3`
+  会把 `--json` 当成 profile 名，在用户配置里真的建出一个叫 `--json` 的 profile 并激活它（实测确认）。
+  现在取值缺失/为空/以 `--` 开头时明确报错退出 1，不动配置。
+- **`31066` 的 `action` 去重**：原句重复了「网盘路径区分大小写」（该句已移入 `internalDetail`）。
+
+### 📚 文档
+
+- `--verbose` 的说明统一为「进度/日志只写 stderr（`bdp error`：附带 internalDetail）」——
+  此前单命令帮助写的是新语义、全局帮助写的是旧语义，自相矛盾。
+- `bdp help error` 的 usage 改为 `bdp error [<code>]`，并注明不填时默认解释 `-3`。
+- `reference/commands.md` 补充取值口径（`code` 只接受三种写法、布尔参数取值集合、
+  `list` 与 `code` 同给时以 `list` 为准）。
+- 重新构建 `baiduwangpan-skill.zip`（随 `skills/` 变更同步，35,726 字节 / 8 个文件）。
+
+### 🧪 测试
+
+- 新增 `test/internal-detail.test.js`（16 条）与 `test/audit-v192.test.js`（26 条）：
+  分层契约、CLI/MCP 两种口径逐字段一致、查表收紧、布尔口径统一、缺少命令的退出码、
+  前置换排列、空串/单个连字符、前置换 `--json-file`、MCP 参数错误映射 `-32001`、
+  回显限长、`--profile` 取值校验。
+  测试总数 314 → **356**。
+
+> **本版本尚未发布到 npm**（npm latest 仍为 1.8.5）。
+> 需要 1.9.x 的功能请从 GitHub tag 安装：`npm install -g NkAntony777/baiduwangpan-cli#v1.9.2`
+> 或等 npm 发布后再升级。
 
 ## v1.9.1 — 2026-11-02
 

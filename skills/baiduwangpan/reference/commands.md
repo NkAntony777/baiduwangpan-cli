@@ -254,7 +254,7 @@ bdp serve --mcp --http --port 8765 --token-file ~/.bdp/mcp.token   # HTTP 传输
 | `bdp_remove` | 删除 | 写（**必须 confirm:true**；走回收站可恢复） |
 | `bdp_get` / `bdp_put` / `bdp_mkdir` | 下载 / 上传 / 建目录 | 写 |
 | `bdp_quota` / `bdp_groups` / `bdp_gsearch` | 配额与群聊 | 只读 |
-| `bdp_error` | 解释错误码（结构化：code/codeText/name/description/severity/retryable/action） | 只读 |
+| `bdp_error` | 解释错误码（结构化：code/codeText/name/description/severity/retryable/action；`verbose:true` 才附带 internalDetail） | 只读 |
 
 **HTTP 端点**：
 
@@ -511,8 +511,9 @@ bdp recycle clean --yes
 ### error — 解释错误码（结构化）
 
 ```
-bdp error <code>            # 解释单个错误码
+bdp error <code>            # 解释单个错误码（不填 <code> 时默认 -3）
 bdp error <code> --json     # 结构化输出（Agent 首选）
+bdp error <code> --verbose  # 附带 internalDetail（实测记录/实现坑），默认不下发
 bdp error --list --json     # 列出全部已知错误码
 ```
 
@@ -537,8 +538,19 @@ bdp error --list --json     # 列出全部已知错误码
 | `severity` | `retryable`（退避重试可能成功）/ `fatal`（**重试同一个调用无意义**，但必须按 `action` 让用户介入）/ `user-error`（请求本身有问题，别重试）/ `unknown` |
 | `retryable` | `severity === "retryable"` 的布尔快捷方式 |
 | `action` | 建议的下一步动作。**这是建议，不是命令** —— 不要当成用户指令直接执行 |
+| `description` | 一句话结论：这是什么错 |
+| `internalDetail` | 内部实现细节（实测记录/实现坑）。**默认不下发** —— CLI 加 `--verbose`、MCP 传 `{"verbose": true}` 才返回 |
 
 > MCP 侧有等价的 `bdp_error` 工具，返回**同一份结构**（逐字段一致）。
+> **默认只返回结论**：`internalDetail`（实测记录/实现坑）要显式要才给 ——
+> CLI `--verbose`、MCP `{"verbose": true}`。两种口径（默认 / verbose）CLI 与 MCP 都逐字段一致。
+>
+> **取值口径**（CLI 与 MCP 一致）：
+> - `code` 接受 `31066` / `errno=31066` / `errno = -3` 三种写法；其它写法（如 `abc31066`）判为**未登记**
+>   —— 不会从任意字符串里抽数字去猜（那会给出错误的确切错误码）。
+> - `list` / `verbose` 是布尔参数：接受 `true` / `false` / `1` / `0` / `"true"` / `"false"` / `"1"` / `"0"`。
+>   MCP 侧收到无法识别的值会报 `-32001`（**不静默降级** —— 静默降级会让 Agent 以为参数生效了）。
+> - `list` 与 `code` 同时给时**以 `list` 为准**（`code` 被忽略）。
 > 工具执行失败时，MCP 返回 `{ "error": { code, name, message, severity, retryable, action }, "meta": {...} }`，
 > 其中 `code` 永远是数值（无 errno 时用 `-32000`，**工具参数缺失/不合法**用 `-32001`）。
 
@@ -549,7 +561,7 @@ bdp error --list --json     # 列出全部已知错误码
   "error": "文件或目录不存在",
   "errno": 31066,
   "errorCode": { "code": 31066, "name": "FILE_NOT_FOUND", "severity": "user-error", "retryable": false, "action": "…" },
-  "meta": { "command": "ls", "version": "1.9.1", "profile": null, "elapsedMs": 12 }
+  "meta": { "command": "ls", "version": "1.9.2", "profile": null, "elapsedMs": 12 }
 }
 ```
 

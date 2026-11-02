@@ -1,7 +1,7 @@
 ---
 name: baiduwangpan
 description: 百度网盘 CLI 操作技能 — 基于 baiduwangpan-cli (bdp) 命令，支持全盘文件浏览/搜索/免下载读取内容/上传下载/群聊文件浏览。当用户要求查看、搜索、读取、上传、下载百度网盘文件，或浏览百度网盘群聊文件时使用。
-version: 1.9.1
+version: 1.9.2
 authors:
   - NkAntony777
 credentials:
@@ -213,7 +213,7 @@ bdp serve --json       # 查看 MCP 模式信息（不启动）
 --json            # 结构化 JSON 输出（Agent 首选）
 --json-file <p>   # JSON 写入文件（UTF-8，绕过控制台编码）
 --legacy-json     # 输出裸数组（旧版兼容）
---verbose         # 进度/日志只写 stderr
+--verbose         # 进度/日志只写 stderr（bdp error：附带 internalDetail）
 --profile <name>  # 切换账号 profile
 ```
 
@@ -352,6 +352,8 @@ bdp organize [path] --by type --apply --yes   # 执行（真实移动网盘文�
    MCP 工具结果同样带。**它只追加字段**，既有字段名一个没变 —— 用它判断「跑的是哪条命令、什么版本、哪个账号」。
 10. **错误码是结构化的**：`bdp error <code> --json` 与 MCP `bdp_error` 返回同一份结构 ——
    `code`（数值）/ `name` / `description` / `severity` / `retryable` / `action`。
+   **`internalDetail`（内部实现细节）默认不下发** —— 要深挖（实测记录、实现坑）时
+   CLI 加 `--verbose`、MCP 传 `{"verbose": true}`。默认只给结论是刻意的：上下文留给任务本身。
    `severity=retryable` → 可以退避重试；`fatal` → **重试同一个调用无意义**，但要按 `action` 让用户介入（重新登录等）；
    `user-error` → 请求本身错了，别重试（`-32001 TOOL_ARGUMENT_ERROR` 就是这一类 —— 你的参数错了）。
    **命令失败时的 `--json` 输出**也带 `errorCode` 与 `meta`，不用再单独调一次 `bdp error`。
