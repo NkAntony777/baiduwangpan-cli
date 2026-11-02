@@ -230,7 +230,7 @@ cmds.login = async (args, json) => {
     config.setAuth({
       bduss: args.flags.bduss,
       stoken: args.flags.stoken,
-      webTransport: "curl",
+      webTransport: "native",
     });
     const cfg = config.get();
     output(

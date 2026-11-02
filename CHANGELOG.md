@@ -4,6 +4,52 @@
 
 ---
 
+## v1.8.1 — 2026-11-02
+
+> 主题：**真正的并发** —— 修复 v1.8.0 里 `--concurrency` 形同虚设的问题。
+
+### 🔴 修复：并发从未真正生效
+
+- **根因一：worker 池的退出条件错误**
+  `scanFiles` 的 worker 用 `pending.pop()` 取任务，**队列空就 return 退出**。
+  但队列空 ≠ 任务完成 —— 其他 worker 可能正在处理目录、子目录还没放回队列。
+  初始只有根目录时，**8 个 worker 里有 7 个立刻退出**，此后并发度恒为 1。
+  现在改为：队列空时若还有活跃 worker 就让出事件循环继续等，只有全员空闲才退出。
+- **根因二：`spawnSync` 阻塞事件循环**
+  curl 版每次请求都同步 fork 一个 curl 进程，**8 worker 与 1 worker 耗时完全相同**（实测 31.0 s vs 28.2 s）。
+  新增 `webTransport="native"`（Node 内置 fetch，异步 + keep-alive），并**设为默认**。
+- **实测提升**（同一目录，结果完全一致）：
+
+  | 场景 | 修复前 | 修复后 | 提升 |
+  |:-----|:-------|:-------|:-----|
+  | dedup 扫描 77 目录 | 27,776 ms | 1,433 ms（conc=16） | **19.4×** |
+  | index 全量构建 43 文件 | 73,972 ms | 8,060 ms | **9.2×** |
+
+- **等价性验证**：curl 与 native 两种传输在 7 个目录逐一比对，
+  **业务字段（path/size/md5/fs_id）100% 一致**；
+  仅 `request_id` 与签名 URL 里的 `dp-logid` 追踪参数不同（每次请求自增，与内容无关）。
+
+### 🔴 修复：Range 请求缺 Cookie 导致 ZIP/DOCX/XLSX 预览失效
+
+- 百度 dlink **必须带 Cookie** 才返回文件本体（实测：不带 → 403 / 返回错误 JSON）。
+  原实现的 `curlRange` 只带 UA 和 Range 头 → **ZIP 家族预览全部失败**（中央目录解析不到）。
+  现在 `curlRange` 与 `fetchRange` 都补上 Cookie + Referer。
+- 顺带修掉 `fetchSize`：改用异步 HEAD 并优先读 `Content-Range` 的总长
+  （部分 CDN 的 HEAD 响应 `Content-Length` 是 0，那是 302 重定向的响应体）。
+
+### 🟢 其他改进
+
+- `getDlink` 改用 web API（`/api/filemetas?dlink=1`）异步取直链，失败回退引擎 locate；
+  省掉每个文件一次引擎进程启动（42 ms + 网络往返）。
+- `index-builder` 加 worker pool（`--concurrency`），文件级并发处理。
+- `preview` 全链路异步化（head / 正文 / 中央目录 / 成员读取）。
+
+### 🧪 测试
+
+220 全绿
+
+---
+
 ## v1.8.0 — 2026-11-02
 
 > 主题：**把网盘变成可检索、可清理、可读的知识库** ——

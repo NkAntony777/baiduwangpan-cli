@@ -229,21 +229,27 @@ bdp dedup /med --remove-duplicates --dry-run
 `partial=true` 表示扫描不完整（目录分页达上限 / 有畸形条目），
 此时结果可能漏报重复文件。`noMd5` 表示有多少文件百度没返回 md5（无法参与精算）。
 
-### 性能：并发模式
+### 性能：并发与传输模式
 
 ```
-# 默认 curl 传输（每次请求 fork 一个 curl 进程，串行）
-bdp dedup /med --concurrency 8
-
-# native 传输（Node 内置 fetch，异步真并发 + keep-alive 连接复用）
-bdp config --set webTransport native
-bdp dedup /med --concurrency 8
+bdp dedup /med --concurrency 16      # 真正的并发（默认传输已是 native）
+bdp config --set webTransport curl    # 需要时切回 curl（兼容性回退）
 ```
 
-> **为什么有 native 模式**：curl 版用 `spawnSync` 同步起进程，**会阻塞事件循环** ——
-> 于是 `--concurrency` 参数实际上是假的（实测 8 worker 与 1 worker 耗时相同）。
-> `native` 模式改用 Node 内置 `fetch`，并发才真正生效（实测全盘扫描提速约 1.3×）。
-> 两种模式结果一致，可随时用 `bdp config --set webTransport curl` 切回。
+> **v1.8.1 起 `--concurrency` 真正生效**。此前它形同虚设：
+> worker 池的退出条件错误（队列空即退出，而子目录还没放回队列）
+> + `spawnSync` 同步阻塞事件循环，两者叠加导致并发度恒为 1。
+
+> 实测（同一目录，结果完全一致）：
+
+> | 场景 | v1.8.0 | v1.8.1 | 提升 |
+> |:-----|:-------|:-------|:-----|
+> | dedup 扫描 77 目录 | 27.8 s | 1.4 s（conc=16） | **19.4×** |
+> | index 全量构建 43 文件 | 74.0 s | 8.1 s | **9.2×** |
+
+> 默认传输为 `native`（Node 内置 fetch，异步 + keep-alive 连接复用）。
+> 两种传输在 7 个目录逐一比对，业务字段 100% 一致 ——
+> 仅 `request_id` 与签名 URL 的 `dp-logid` 追踪参数不同（每次请求自增，与内容无关）。
 
 ### index / ask — 本地全文索引与检索
 

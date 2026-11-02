@@ -1,7 +1,7 @@
 ---
 name: baiduwangpan
 description: 百度网盘 CLI 操作技能 — 基于 baiduwangpan-cli (bdp) 命令，支持全盘文件浏览/搜索/免下载读取内容/上传下载/群聊文件浏览。当用户要求查看、搜索、读取、上传、下载百度网盘文件，或浏览百度网盘群聊文件时使用。
-version: 1.8.0
+version: 1.8.1
 authors:
   - NkAntony777
 credentials:

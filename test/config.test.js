@@ -105,7 +105,7 @@ test("get() falls back to global auth fields the profile does not override", () 
   const merged = config.get();
   assert.equal(merged.bduss, "svip-bduss");
   assert.equal(merged.cookie, "BDUSS=global-cookie", "profile without cookie falls back to global");
-  assert.equal(merged.webTransport, "curl", "defaults still apply under profile");
+  assert.equal(merged.webTransport, "native", "defaults still apply under profile");
   config.unsetProfile();
 });
 
