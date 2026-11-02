@@ -140,6 +140,24 @@ function parseArgs(argv) {
       opts.flags.top = parseInt(argv[++i], 10) || 15;
     } else if (arg === "--limit") {
       opts.flags.limit = parseInt(argv[++i], 10) || 50;
+    } else if (arg === "--remove-duplicates") {
+      opts.flags.removeDuplicates = true;
+    } else if (arg === "--keep") {
+      opts.flags.keep = String(argv[++i] || "shortest");
+    } else if (arg === "--db") {
+      opts.flags.db = argv[++i];
+    } else if (arg === "--include") {
+      opts.flags.include = String(argv[++i] || "").split(",").map((x) => x.trim()).filter(Boolean);
+    } else if (arg === "--exclude") {
+      opts.flags.exclude = String(argv[++i] || "").split(",").map((x) => x.trim()).filter(Boolean);
+    } else if (arg === "--no-extract") {
+      opts.flags.noExtract = true;
+    } else if (arg === "--max-files") {
+      opts.flags.maxFiles = parseInt(argv[++i], 10) || 0;
+    } else if (arg === "--max-bytes") {
+      opts.flags.maxBytes = parseInt(argv[++i], 10) || 0;
+    } else if (arg === "--ext") {
+      opts.flags.ext = String(argv[++i] || "").toLowerCase();
     } else if (arg === "--max-results") {
       opts.flags.maxResults = parseInt(argv[++i], 10) || 0;
     } else if (arg === "--fields") {
@@ -1128,6 +1146,248 @@ cmds.error = async (args, json) => {
 // ── 命令注册表（bdp help / 未知命令提示的唯一数据源）──────────────────
 // 每项: { group: "pan"|"group"|"config", usage, desc, options?, examples?, note? }
 // 新增命令时必须在此登记，bdp help 才会展示（避免手写 HELP 漂移）
+cmds.dedup = async (args, json) => {
+  const dedupLib = require('../lib/dedup');
+  const root = args._[0] || '/';
+  verboseLog(args, 'dedup ' + root + ' depth=' + (args.flags.depth || 12) + ' concurrency=' + (args.flags.concurrency || 8));
+
+  const result = await dedupLib.scanDuplicates(root, {
+    concurrency: args.flags.concurrency,
+    maxDepth: args.flags.depth,
+    onProgress: args.flags.progress ? (p) => {
+      process.stderr.write('[dedup] 已扫描 ' + p.scannedDirs + ' 目录 / ' + p.files + ' 文件 / ' + (p.elapsedMs / 1000).toFixed(1) + 's\n');
+    } : undefined,
+  });
+
+  const clusters = dedupLib.pickKeepers(result.clusters, { keep: args.flags.keep || 'shortest' });
+  const top = args.flags.top || 20;
+  const shown = clusters.slice(0, top);
+  const removable = clusters.flatMap((c) => c.removable);
+
+  // --remove-duplicates：删除重复副本（走回收站，可恢复）
+  let removal = null;
+  if (args.flags.removeDuplicates) {
+    if (!args.flags.yes) {
+      const msg = '删除重复副本是高危操作，需要显式确认：请加 --yes（或先 --dry-run 预览）';
+      if (json || args.flags.jsonFile) {
+        emitJson({ error: msg, requiresConfirmation: true, candidates: removable.length }, args);
+      } else {
+        console.error('[ERROR] ' + msg);
+      }
+      return 1;
+    }
+    if (args.flags.dryRun) {
+      removal = { dryRun: true, candidates: removable.length, paths: removable.slice(0, top) };
+    } else {
+      const pan = require('../lib/pan');
+      const results = pan.remove(removable);
+      const failed = results.filter((r) => !r.ok);
+      removal = {
+        attempted: results.length,
+        deleted: results.length - failed.length,
+        failed: failed.length,
+        freedBytes: result.wastedBytes,
+        errors: failed.slice(0, 10),
+      };
+    }
+  }
+
+  const payload = {
+    root: result.root,
+    scannedFiles: result.scannedFiles,
+    scannedDirs: result.scannedDirs,
+    failedDirs: result.failedDirs,
+    partial: result.partial,
+    obfuscatedMd5: result.obfuscatedCount,
+    clusterCount: clusters.length,
+    duplicateFiles: clusters.reduce((s, c) => s + c.files.length - 1, 0),
+    wastedBytes: result.wastedBytes,
+    sizeOnlyWastedBytes: result.sizeOnlyWastedBytesBytes,
+    clusters: shown.map((c) => ({
+      size: c.size,
+      md5: c.md5,
+      wasted: c.wasted,
+      keep: c.keep,
+      removable: c.removable,
+      files: c.files.map((f) => f.path),
+    })),
+    truncated: clusters.length > shown.length,
+    removal,
+    elapsedMs: result.elapsedMs,
+  };
+
+  if (json || args.flags.jsonFile) {
+    emitJson(payload, args);
+    return;
+  }
+
+  console.log('扫描 ' + result.scannedFiles + ' 个文件 / ' + result.scannedDirs + ' 目录' +
+    (result.failedDirs ? ' / ' + result.failedDirs + ' 目录失败' : '') +
+    '  (' + (result.elapsedMs / 1000).toFixed(1) + 's)');
+  if (result.obfuscatedCount) {
+    console.log('其中 ' + result.obfuscatedCount + ' 个文件的 md5 需反混淆（已自动处理）');
+  }
+  if (!clusters.length) {
+    console.log('✅ 未发现重复文件');
+    return;
+  }
+  console.log('');
+  console.log('发现 ' + clusters.length + ' 组重复，共 ' + payload.duplicateFiles + ' 个冗余文件，可释放 ' +
+    formatSize(result.wastedBytes) + '（按大小粗筛为 ' + formatSize(result.sizeOnlyWastedBytes) + '）');
+  console.log('');
+  shown.forEach((c, i) => {
+    console.log('  [' + (i + 1) + '] ' + formatSize(c.size) + ' × ' + c.files.length + ' 份  md5=' + c.md5);
+    c.files.forEach((f) => {
+      console.log('       ' + (f.path === c.keep ? '保留  ' : '可删  ') + f.path);
+    });
+  });
+  if (payload.truncated) console.log('\n  ... 还有 ' + (clusters.length - shown.length) + ' 组未显示（用 --top 调整）');
+  if (removal) {
+    console.log('');
+    if (removal.dryRun) console.log('[dry-run] 将删除 ' + removal.candidates + ' 个重复副本');
+    else console.log('✅ 已删除 ' + removal.deleted + ' 个重复副本（回收站可恢复），释放约 ' + formatSize(removal.freedBytes));
+  } else if (args.flags.removeDuplicates) {
+    console.log('提示：加 --yes 可删除重复副本（走回收站，可恢复）');
+  }
+};
+
+cmds.preview = async (args, json) => {
+  const previewLib = require('../lib/preview');
+  const path = args._[0];
+  if (!path) {
+    console.error('Usage: bdp preview <path>');
+    process.exit(1);
+  }
+  const result = await previewLib.preview(path, {
+    maxBytes: args.flags.maxBytes ? parseInt(args.flags.maxBytes, 10) : undefined,
+    maxPages: args.flags.maxPages ? parseInt(args.flags.maxPages, 10) : undefined,
+  });
+  if (json || args.flags.jsonFile) {
+    emitJson(result, args);
+    if (result.error) return 1;
+    return;
+  }
+  console.log('路径    ' + result.path);
+  console.log('类型    ' + result.type + (result.ext ? ' (' + result.ext + ')' : ''));
+  if (result.size) console.log('大小    ' + formatSize(result.size));
+  if (result.encoding) console.log('编码    ' + result.encoding);
+  if (result.width) console.log('尺寸    ' + result.width + '×' + result.height + ' (' + result.format + ')');
+  if (result.pages) console.log('页数    ' + result.pages);
+  if (result.metadata) console.log('元数据  ' + JSON.stringify(result.metadata));
+  if (result.entryCount !== undefined) {
+    console.log('成员    ' + result.entryCount + ' 项（压缩 ' + formatSize(result.compressedTotal) + ' → 解压 ' + formatSize(result.uncompressedTotal) + '）');
+    result.entries.slice(0, 30).forEach((e) => console.log('   ' + (e.isDir ? 'd ' : '  ') + e.name + '  ' + formatSize(e.size)));
+    if (result.entries.length > 30) console.log('   ... 还有 ' + (result.entries.length - 30) + ' 项');
+  }
+  if (result.text) {
+    console.log('');
+    console.log('--- 内容 ---');
+    const lines = result.text.split('\n');
+    const max = args.flags.n ? parseInt(args.flags.n, 10) : 40;
+    lines.slice(0, max).forEach((l) => console.log(l));
+    if (lines.length > max) console.log('... 还有 ' + (lines.length - max) + ' 行');
+  }
+  if (result.note) console.log('' + result.note);
+  if (result.error) {
+    console.error('[ERROR] ' + result.error);
+    return 1;
+  }
+};
+
+cmds.index = async (args, json) => {
+  const builder = require('../lib/index-builder');
+  const store = require('../lib/index-store');
+  const action = args._[0] || 'build';
+
+  if (action === 'status') {
+    const handle = store.openIndex(args.flags.db);
+    try {
+      const st = store.status(handle);
+      if (json || args.flags.jsonFile) { emitJson(st, args); return; }
+      console.log('索引文件  ' + st.path);
+      console.log('已索引    ' + st.files + ' 个文件');
+      console.log('正文大小  ' + formatSize(st.contentBytes));
+      console.log('数据库    ' + formatSize(st.dbBytes));
+      if (st.lastIndexedAt) console.log('最近索引  ' + new Date(st.lastIndexedAt).toISOString());
+    } finally { handle.close(); }
+    return;
+  }
+
+  if (action === 'prune') {
+    const root = args._[1] || '/';
+    const r = await builder.pruneIndex(root, { dbPath: args.flags.db, depth: args.flags.depth });
+    if (json || args.flags.jsonFile) { emitJson(r, args); return; }
+    console.log('✅ 清理了 ' + r.removed + ' 个网盘已不存在的索引条目');
+    r.paths.forEach((p) => console.log('   ' + p));
+    return;
+  }
+
+  if (action !== 'build') {
+    console.error('Usage: bdp index [build|status|prune] [path]');
+    process.exit(1);
+  }
+
+  const root = args._[1] || '/';
+  const r = await builder.buildIndex(root, {
+    dbPath: args.flags.db,
+    maxFiles: args.flags.maxFiles ? parseInt(args.flags.maxFiles, 10) : 0,
+    include: args.flags.include,
+    exclude: args.flags.exclude,
+    extract: !args.flags.noExtract,
+    depth: args.flags.depth,
+    concurrency: args.flags.concurrency,
+    onProgress: args.flags.progress ? (p) => {
+      process.stderr.write('[index] 已索引 ' + p.indexed + ' / 考虑 ' + p.considered + ' / 跳过 ' + p.skipped + ' / ' + (p.elapsedMs / 1000).toFixed(1) + 's\n');
+    } : undefined,
+  });
+  if (json || args.flags.jsonFile) { emitJson(r, args); return; }
+  console.log('✅ 索引完成');
+  console.log('  扫描文件  ' + r.scannedFiles + ' 个');
+  console.log('  新增索引  ' + r.indexed + ' 个（跳过未变 ' + r.skipped + '）');
+  console.log('  正文总量  ' + formatSize(r.contentBytes));
+  console.log('  索引文件  ' + r.indexPath + ' (' + formatSize(r.dbBytes) + ')');
+  console.log('  耗时      ' + (r.elapsedMs / 1000).toFixed(1) + 's');
+};
+
+cmds.ask = async (args, json) => {
+  const store = require('../lib/index-store');
+  const query = args._.join(' ').trim() || args.flags.k;
+  if (!query) {
+    console.error('Usage: bdp ask <自然语言查询>');
+    process.exit(1);
+  }
+  const handle = store.openIndex(args.flags.db);
+  try {
+    const st = store.status(handle);
+    if (!st.files) {
+      const msg = '索引为空，请先运行: bdp index build';
+      if (json || args.flags.jsonFile) emitJson({ error: msg }, args);
+      else console.error('[ERROR] ' + msg);
+      return 1;
+    }
+    const hits = store.search(handle, query, {
+      limit: args.flags.limit || 20,
+      dirPrefix: args.flags.path,
+      ext: args.flags.ext,
+    });
+    if (json || args.flags.jsonFile) {
+      emitJson({ query, total: hits.length, indexFiles: st.files, hits }, args);
+      return;
+    }
+    if (!hits.length) {
+      console.log('未找到匹配内容（已索引 ' + st.files + ' 个文件）');
+      return;
+    }
+    console.log('查询「' + query + '」→ ' + hits.length + ' 条结果（索引 ' + st.files + ' 个文件）');
+    console.log('');
+    hits.forEach((h, i) => {
+      console.log('  [' + (i + 1) + '] ' + h.path);
+      if (h.size) console.log('       ' + formatSize(h.size) + (h.ext ? '  .' + h.ext : ''));
+      if (h.snippet) console.log('       ' + h.snippet.replace(/\n/g, ' ').trim());
+    });
+  } finally { handle.close(); }
+};
+
 const COMMANDS = {
   ls: {
     group: "pan",
@@ -1135,6 +1395,81 @@ const COMMANDS = {
     desc: "列出目录",
     flags: [],
     examples: ["bdp ls /", "bdp ls /文档 --json"],
+  },
+  dedup: {
+    group: "pan",
+    usage: "bdp dedup [path] [--remove-duplicates --yes]",
+    desc: "扫描重复文件（按 size 粗筛 + md5 精算，自动反混淆）",
+    flags: ["top", "depth", "concurrency", "keep", "removeDuplicates", "yes", "dryRun", "progress"],
+    note: "百度 md5 经混淆，同一内容在不同路径返回值不同；本命令自动反混淆后比对。删除走回收站可恢复。",
+    options: [
+      "--top <N>          最多显示多少组 (默认20)",
+      "--depth <N>        扫描深度 (默认12)",
+      "--concurrency <N>  并发目录数 (默认8)",
+      "--keep <策略>      保留哪个: shortest(默认)/oldest/newest",
+      "--remove-duplicates 删除重复副本（需配合 --yes）",
+      "--dry-run          只预览不删除",
+      "--yes              确认执行删除",
+      "--progress         输出扫描进度",
+    ],
+    examples: [
+      "bdp dedup /med",
+      "bdp dedup / --top 50 --json",
+      "bdp dedup /med --remove-duplicates --dry-run",
+    ],
+  },
+  preview: {
+    group: "pan",
+    usage: "bdp preview <path>",
+    desc: "多类型预览：PDF 文本 / ZIP 目录 / DOCX / XLSX / EPUB / 图片尺寸",
+    flags: ["n", "maxBytes", "maxPages"],
+    note: "ZIP 家族只读取尾部中央目录，不下载整包；PDF 为扫描件时会明确说明。",
+    options: [
+      "--lines <N>        文本预览显示行数 (默认40)",
+      "--max-bytes <N>    文本读取字节上限",
+      "--max-pages <N>    PDF 最多解析页数",
+    ],
+    examples: [
+      'bdp preview "/中医/某.pdf"',
+      'bdp preview "/资料.zip" --json',
+    ],
+  },
+  index: {
+    group: "pan",
+    usage: "bdp index [build|status|prune] [path]",
+    desc: "构建本地全文索引（SQLite FTS5 + 中文二元分词）",
+    flags: ["db", "include", "exclude", "noExtract", "maxFiles", "depth", "concurrency", "progress"],
+    note: "索引存在 ~/.bdp/index/default.db；md5+size 未变的文件会被跳过（增量）。",
+    options: [
+      "--db <path>       索引文件路径",
+      "--include <list>   只索引路径含这些词的文件(逗号分隔)",
+      "--exclude <list>   排除路径含这些词的文件",
+      "--no-extract      只索引文件名，不抽取正文",
+      "--max-files <N>    最多索引多少文件",
+      "--depth <N>        扫描深度",
+      "--progress         输出进度",
+    ],
+    examples: [
+      "bdp index build /中医",
+      "bdp index status",
+      "bdp index build / --include 中医,玄学",
+    ],
+  },
+  ask: {
+    group: "pan",
+    usage: "bdp ask <自然语言查询>",
+    desc: "基于本地索引检索网盘内容（全文 + 文件名）",
+    flags: ["db", "limit", "path", "ext", "k"],
+    options: [
+      "--limit <N>       返回条数 (默认20)",
+      "-p <dir>         只在该目录前缀下搜",
+      "--ext <ext>      只搜某种扩展名",
+      "--db <path>      指定索引文件",
+    ],
+    examples: [
+      'bdp ask "倪海厦讲的风水"',
+      'bdp ask "甘草配伍" --limit 10 --json',
+    ],
   },
   search: {
     group: "pan",

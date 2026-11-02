@@ -29,6 +29,9 @@
 - **🚦 可信的退出码** — 命令失败一定以非零退出码结束，Agent 不会把失败当成功
 - **🔧 双模式** — 既是 CLI 工具，也可作为 Node.js 库 `require()` 使用
 - **🔐 凭证安全** — 配置存储在 `~/.bdp/config.json`，不写入代码或日志；`bdp config` 默认脱敏
+- **🧹 重复文件清理** — `bdp dedup` 先按 size 粗筛再按 md5 精算，自动破解百度的 md5 混淆
+- **👁️ 全类型预览** — `bdp preview` 抽取 PDF 文本层（中文 CID 字体可还原）、ZIP 中央目录、DOCX/XLSX 正文
+- **🔎 本地全文索引** — `bdp index` + `bdp ask`，中文二元分词 + SQLite FTS5，零外部依赖
 
 ## 📌 能力一览
 
@@ -41,6 +44,10 @@
 | **读取后 N 行** | `bdp tail -n 30 /文档/log.txt` | 免下载 |
 | **搜索文件内容** | `bdp grep "关键词" /文档/file.txt` | 免下载 |
 | 预览文件 | `bdp peek /文档/report.pdf` | 类型检测 + 前 10 行 + md5/ctime |
+| **全类型预览** | `bdp preview /文档/报告.pdf` | PDF 文本 / ZIP 目录 / DOCX / XLSX / 图片尺寸 |
+| **查重复文件** | `bdp dedup /med` | 自动反混淆 md5，报告可释放空间 |
+| **建立全文索引** | `bdp index build /中医` | 本地 SQLite FTS5，增量更新 |
+| **检索内容** | `bdp ask "甘草配伍"` | 基于索引搜正文，不只搜文件名 |
 | 下载 | `bdp get /文档/file.zip` | 保存到本地，**size 校验 + 断点续传** |
 | 上传 | `bdp put ./file.txt /文档/` | 全盘任意位置 |
 | 移动/重命名 | `bdp mv <src> <dst>` | 移动或重命名 |

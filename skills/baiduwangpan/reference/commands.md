@@ -158,6 +158,89 @@ bdp peek /文档/report.pdf
 bdp peek /文档/data.json --json
 ```
 
+### preview — 多类型内容预览
+
+```
+bdp preview <path> [--lines N] [--max-bytes N] [--max-pages N]
+```
+
+按文件类型走不同的「最省字节」路径，尽量不下载整个文件：
+
+| 类型 | 行为 |
+|:-----|:-----|
+| TXT/MD/CSV/JSON | Range 读前 N KB，自动识别 GBK/UTF-8 |
+| **PDF** | 解析 xref + 字体 ToUnicode CMap，抽中文文本层（中文 CID 字体可还原） |
+| ZIP | **只读文件尾部中央目录**列出成员，500MB 的包也不必下载 |
+| DOCX | 抽 `word/document.xml` 正文 |
+| XLSX | 抽 `xl/sharedStrings.xml` 单元格文本 |
+| EPUB | 解析 OPF 元数据 |
+| 图片 | 给尺寸（PNG/JPEG/GIF/BMP/WebP） |
+
+- `--json` 返回结构化结果（`type` / `text` / `entries[]` / `metadata` / `width`）
+- **扫描件 PDF 无文本层**，会返回 `note` 明确说明（不是静默返回空）；
+  此时用 `bdp get` 下载后本地 OCR
+- 加密 PDF 同样会明确说明
+
+```bash
+bdp preview /中医/2025版药典/内容对比/0101 片剂 对比表.pdf.pdf
+bdp preview /资料.zip --json
+```
+
+### dedup — 重复文件扫描
+
+```
+bdp dedup [path] [--top N] [--depth N] [--keep shortest|oldest|newest]
+bdp dedup <path> --remove-duplicates --yes
+```
+
+**关键前提**：百度 `/api/list` 返回的 md5 是**混淆值** ——
+同一份内容放在两个不同路径，返回的 md5 竟然不同。不解密就做去重会**漏报**。
+本命令自动反混淆（算法移植自 BaiduPCS-Go 源码 `baidupcs/util.go → DecryptMD5`）。
+
+两阶段策略：
+
+1. **粗筛**：递归遍历，按 size 分组（零额外请求）
+2. **精算**：仅对同 size 候选，按反混淆后的真实 md5 细分
+
+- `--json` 返回 `clusters[]`（每组含 `size`/`md5`/`wasted`/`keep`/`removable`）
+  以及 `wastedBytes`（md5 精算）与 `sizeOnlyWastedBytes`（仅按大小）两个数字
+  —— 两者之差即被 size 误判、实为不同内容的文件
+- `--remove-duplicates` 删除重复副本，**走百度回收站（可恢复）**
+- 非交互环境必须显式 `--yes`（与 `bdp rm` 一致）；先 `--dry-run` 预览更稳妥
+
+```bash
+bdp dedup /med --top 50
+bdp dedup /med --remove-duplicates --dry-run
+```
+
+### index / ask — 本地全文索引与检索
+
+```
+bdp index build [path] [--include a,b] [--exclude a,b] [--no-extract] [--max-files N]
+bdp index status
+bdp index prune [path]
+bdp ask <查询> [--limit N] [-p dir] [--ext ext]
+```
+
+把网盘变成可检索的知识库 —— `bdp search` 只能搜**文件名**，
+`bdp ask` 能搜**正文**（TXT/PDF/DOCX/XLSX 的实际内容）。
+
+- **零外部依赖**：Node 24 内置 `node:sqlite`（SQLite 3.53.4，FTS5 可用）
+- **中文分词**：FTS5 的 unicode61 不切分中文（"风水" 查不中"倪海厦讲的风水古籍"），
+  trigram 又要求查询词 ≥3 字。本工具建索引时把中文切成**二元组**再交给 unicode61，
+  实测两字查询也能命中
+- **增量**：md5 + size 未变的文件跳过，重复 build 只更新变化文件
+- 索引默认存 `~/.bdp/index/default.db`
+- `--no-extract` 只索引文件名与路径（秒级完成，搜不到正文但能搜到文件）
+- `--include` / `--exclude` 按路径关键词限定范围（建议先用它缩小范围）
+
+```bash
+bdp index build /中医 --include 中医
+bdp index status
+bdp ask "甘草配伍禁忌" --limit 10
+bdp ask "无菌检查法" -p /中医 --json
+```
+
 ### get — 下载文件
 
 ```

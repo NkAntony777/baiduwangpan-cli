@@ -1,7 +1,7 @@
 ---
 name: baiduwangpan
 description: 百度网盘 CLI 操作技能 — 基于 baiduwangpan-cli (bdp) 命令，支持全盘文件浏览/搜索/免下载读取内容/上传下载/群聊文件浏览。当用户要求查看、搜索、读取、上传、下载百度网盘文件，或浏览百度网盘群聊文件时使用。
-version: 1.7.0
+version: 1.8.0
 authors:
   - NkAntony777
 credentials:
@@ -24,6 +24,8 @@ credentials:
 - **上传下载**：网盘与本地之间传输文件（size 校验 + 断点续传）
 - **群聊文件**：列出群组、浏览群内分享库、搜索群文件
 - **结构化输出**：所有命令支持 `--json` 输出，便于程序化解析
+- **内容预览与去重**：`bdp preview` 抽 PDF/ZIP/Office 内容，`bdp dedup` 查重复文件（自动反混淆 md5）
+- **本地全文索引**：`bdp index` + `bdp ask`，中文二元分词 + SQLite FTS5，可搜正文而非仅文件名
 - **MCP 接入**：`bdp serve --mcp` 可作为 MCP 服务器运行，工具描述与参数 schema 由客户端自动发现
 - **运行时发现用法**：`bdp help [command] --json` 返回全部命令的 usage/desc/options/examples（结构化）。不确定某命令的用法/参数时先 `bdp help <命令> --json` 查询，不要凭记忆猜测参数
 
@@ -36,6 +38,7 @@ credentials:
 3. **上传/下载** — "把本地文件传到网盘"、"下载网盘里的 xxx"
 4. **群聊文件** — "看看我有哪些群"、"在群里找 xxx 文件"、"浏览群分享的文件"
 5. **文件管理** — 创建目录、删除文件、预览文件信息
+6. **内容深挖** — "这个 PDF/Word 里写了什么"、"网盘里有重复文件吗"、"在网盘内容里搜 XX"
 
 ## 前置检查（每次使用前）
 
@@ -107,6 +110,35 @@ bdp recycle list                   # 回收站
 bdp share set|cancel|list          # 分享管理
 ```
 
+### 内容深度工具（v1.8.0 起）
+
+```bash
+bdp preview <path>                # 多类型预览（PDF文本/ZIP目录/DOCX/XLSX/图片尺寸）
+bdp dedup [path] [--top N]        # 查重复文件（自动反混淆md5，报告可释放空间）
+bdp dedup <path> --remove-duplicates --yes   # 删重复副本（走回收站，可恢复）
+bdp index build [path]            # 建本地全文索引（默认 ~/.bdp/index/default.db）
+bdp index status                  # 看索引状态
+bdp ask "甘草配伍" [--limit N]    # 检索网盘正文（不只搜文件名）
+```
+
+**何时用哪个：**
+
+| 需求 | 命令 |
+|:-----|:-----|
+| 想「看懂」PDF/Word/Excel/压缩包里有什么 | `bdp preview` |
+| 想清理重复文件、释放空间 | `bdp dedup` |
+| 想搜文件**内容**而不只是文件名（如在几百万行 CSV 里找一行） | `bdp index build` + `bdp ask` |
+
+**注意事项**：
+
+- `bdp preview` 对 PDF 会抽文本层；**扫描件（图片型 PDF）无文本层**，会明确说明，
+  此时需 `bdp get` 下载后本地 OCR。
+- `bdp dedup` 会自动反混淆百度的 md5 —— 百度返回的 md5 是混淆值，
+  同一份内容在不同路径返回值不同，不解密就无法正确识别重复。
+- `bdp index build` 首次较慢（要逐文件抽正文）。先用 `--include 中医,玄学` 限定范围，
+  或 `--no-extract` 只索引文件名（秒级）。索引是增量的，重复 build 只更新变化文件。
+- `bdp ask` 依赖索引，未建索引会明确报错提示先跑 `bdp index build`。
+
 ### 群聊文件操作
 
 ```bash
@@ -129,8 +161,9 @@ bdp serve --mcp        # 启动 MCP 服务器（stdio, JSON-RPC 2.0）
 bdp serve --json       # 查看 MCP 模式信息（不启动）
 ```
 
-暴露 10 个工具：`bdp_ls` / `bdp_search` / `bdp_read` / `bdp_peek` / `bdp_quota` /
-`bdp_get` / `bdp_put` / `bdp_mkdir` / `bdp_groups` / `bdp_gsearch`，
+暴露 13 个工具：`bdp_ls` / `bdp_search` / `bdp_read` / `bdp_preview` / `bdp_dedup` /
+`bdp_ask` / `bdp_peek` / `bdp_quota` / `bdp_get` / `bdp_put` / `bdp_mkdir` /
+`bdp_groups` / `bdp_gsearch`，
 每个都带强类型 JSON Schema，客户端可自动发现。
 
 ## 通用选项

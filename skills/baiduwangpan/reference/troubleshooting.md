@@ -15,6 +15,10 @@
 | `文件是二进制内容（<type>，<reason>）` | 对 PDF/zip/图片/音视频执行 cat/head/tail/grep | 改用 `bdp get <path>` 下载到本地处理；或用 `bdp peek` 看元信息 |
 | `删除是高危操作，需要显式确认` | 非交互环境执行 rm 未带 `--yes` | 加 `--yes`（或先用 `--dry-run` 预览）；非交互环境不会弹确认 |
 | `文件或目录不存在`（errno=31066） | 路径不存在或已移动 | 用 `bdp ls /` 确认路径 |
+| `索引为空，请先运行: bdp index build` | `bdp ask` 前没建索引 | 先跑 `bdp index build <path>` |
+| `未提取到文本层（可能是扫描件/图片型 PDF）` | PDF 是图片型，无文本层 | 用 `bdp get` 下载后本地 OCR |
+| `PDF 已加密，无法提取文本` | PDF 有加密 | 下载后用本地工具解密 |
+| `未找到 ZIP 中央目录` | 不是 ZIP 或已损坏 | 用 `bdp peek` 确认类型 |
 | `文件已存在`（errno=31061） | mkdir 目标已存在 | 这是幂等成功，`--json` 返回 `exists:true`，无需处理 |
 
 ## bdp 命令不存在
