@@ -12,11 +12,16 @@ const BDP_JS = path.join(__dirname, "..", "bin", "bdp.js");
 // ══════════════════════════════════════════════════════════
 const { sanitizeControl, sanitizeUntrusted } = require("../lib/sanitize");
 
-test("sanitize: 剔除 RTL 覆写与零宽字符（扩展名伪装）", () => {
+test("sanitize: 剔除 RTL 覆写与终端控制字符；保留合法排版字符（否则路径不再可寻址）", () => {
   const s = sanitizeControl("invoice\u202Egnp.exe");
-  assert.equal(s.indexOf("\u202E"), -1, "RLO 必须被剔除");
+  assert.equal(s.indexOf("\u202E"), -1, "RLO 必须被剔除（扩展名伪装的主要手段）");
   assert.equal(s.indexOf("invoice"), 0);
-  assert.equal(sanitizeControl("a\u200Bb").indexOf("\u200B"), -1);
+  assert.equal(sanitizeControl("a\u0000b").indexOf("\u0000"), -1, "NUL 必须被剔除");
+  assert.equal(sanitizeControl("a\u001Bb").indexOf("\u001B"), -1, "ESC 必须被剔除");
+  // 合法排版字符必须保留 —— 删掉会让返回的路径不再指向真实文件
+  assert.equal(sanitizeControl("a\u200Bb").indexOf("\u200B"), 1, "ZWSP 是合法排版字符，应保留");
+  assert.equal(sanitizeControl("a\u200Cb").indexOf("\u200C"), 1, "ZWNJ 必须保留");
+  assert.equal(sanitizeControl("a\u200Eb").indexOf("\u200E"), 1, "LRM 必须保留");
 });
 
 test("sanitize: 保留 emoji 组合序列所需的 ZWJ（U+200D）", () => {
@@ -208,7 +213,8 @@ test("CLI: offline add --path 真的把保存目录传给引擎", () => {
       JSON.stringify({ bduss: "x", stoken: "y", ua: "t", pcsPath: "node" }),
       "utf-8"
     );
-    cliRun(work, cfgDir, ["offline", "add", "http://example.com/a.iso", "--path", "/下载"]);
+    // offline add 现在需要显式 --yes（创建离线任务 = 让百度服务器代抓 URL）
+    cliRun(work, cfgDir, ["offline", "add", "http://example.com/a.iso", "--path", "/下载", "--yes"]);
     assert.ok(fs.existsSync(argvFile), "假引擎应被调用");
     const argv = JSON.parse(fs.readFileSync(argvFile, "utf-8"));
     assert.ok(argv.indexOf("-path=/下载") >= 0, "保存目录应传给引擎: " + JSON.stringify(argv));

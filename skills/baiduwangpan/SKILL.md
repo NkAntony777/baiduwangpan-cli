@@ -332,8 +332,9 @@ bdp organize [path] --by type --apply --yes   # 执行（真实移动网盘文�
 
 1. **凭证保护**：绝不输出/记录 `~/.bdp/config.json` 中的 BDUSS、STOKEN 值。`bdp config` 输出已脱敏，
    但仍不得回显完整凭证；`--show-secrets` 仅在用户明确要求时使用
-2. **删除操作**：`bdp rm` / `bdp dedup --remove-duplicates` / `bdp organize --apply` / `bdp recycle clean`
-   都是高危操作。非交互环境（Agent / 管道）**必须显式加 `--yes`**，
+2. **删除与外发操作**：`bdp rm` / `bdp dedup --remove-duplicates` / `bdp organize --apply` /
+   `bdp recycle clean` / **`bdp share set`（创建公开分享链接）** / **`bdp offline add`（让百度服务器代抓 URL）** /
+   **`bdp recycle restore`（批量还原）** 都是高危操作。非交互环境（Agent / 管道）**必须显式加 `--yes`**，
    否则命令会拒绝执行并返回退出码 1；交互式终端会弹 y/N 确认。删除前建议先 `--dry-run` 预览
 3. **写入操作**（put/mkdir/rm）：先向用户列出执行计划，确认后再执行
 4. **下载目录**：默认保存到用户指定目录或当前工作目录，不写入系统目录

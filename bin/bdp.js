@@ -45,6 +45,46 @@ const partial = require("../lib/partial");
 const pcsExtra = require("../lib/pcs-extra");
 const { matchesName } = require("../lib/name-match");
 const { ensureUtf8Console } = require("../lib/console");
+// 高危操作确认闸门（与 bdp rm 同款）：
+// 非交互环境（Agent / 管道）必须显式加 --yes，否则拒绝执行并返回退出码 1；
+// 交互式终端弹 y/N。
+async function requireYes(args, json, what, hint) {
+  if (args.flags.yes) return true;
+  if (process.stdin.isTTY) {
+    const readline = require("readline");
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+    const answer = await new Promise((resolve) => rl.question("确认" + what + "? [y/N] ", resolve));
+    rl.close();
+    if (/^y(es)?$/i.test(String(answer).trim())) return true;
+    console.error("[ERROR] 已取消" + what);
+    return false;
+  }
+  const msg = what + "是高危操作，需要显式确认：请加 --yes" + (hint ? "（" + hint + "）" : "");
+  if (json || args.flags.jsonFile) emitJson({ error: msg, requiresConfirmation: true }, args);
+  else console.error("[ERROR] " + msg);
+  return false;
+}
+
+// 离线下载 URL 校验：只允许 http/https，且拒绝指向内网/本机地址
+// （否则百度服务器会成为 SSRF 跳板，把内网内容拉进网盘）。
+function assertSafeOfflineUrl(url) {
+  let u;
+  try {
+    u = new URL(String(url));
+  } catch {
+    throw new Error("URL 非法: " + url);
+  }
+  if (u.protocol !== "http:" && u.protocol !== "https:") {
+    throw new Error("离线下载只支持 http/https URL（已拒绝 " + u.protocol + "）");
+  }
+  const h = u.hostname.toLowerCase();
+  if (/^(127\.|10\.|192\.168\.|169\.254\.|172\.(1[6-9]|2\d|3[01])\.|0\.)/.test(h)
+    || h === "localhost" || h === "::1" || h === "[::1]") {
+    throw new Error("离线下载拒绝指向内网/本机地址（" + h + "）");
+  }
+  return String(url);
+}
+
 // markUntrusted（lib/sanitize.js）：CLI 的 JSON 通道把「来自网盘的正文」包上
 // <untrusted_file>…</untrusted_file> 边界标记，与 MCP 侧（lib/mcp.js 的 sanitizeToolResult）行为一致 ——
 // Agent 读到的正文一律是**数据**，不是可以执行的指令（防间接提示注入）。
@@ -981,6 +1021,8 @@ cmds.recycle = async (args, json) => {
   } else if (action === "restore") {
     const ids = args._.slice(1);
     if (ids.length === 0) { console.error("Usage: bdp recycle restore <fs_id>..."); process.exit(1); }
+    // 批量还原会复活已删文件，且可能覆盖同名现存文件 → 超过 1 项必须显式确认
+    if (ids.length > 1 && !(await requireYes(args, json, "批量还原 " + ids.length + " 项", "还原可能覆盖同名现存文件"))) return 1;
     const r = pcsExtra.recycleRestore(ids);
     if (json || args.flags.jsonFile) emitJson({ restored: ids, ok: true }, args);
     else console.log(`✅ 已还原 ${ids.length} 项: ${ids.join(", ")}`);
@@ -1036,9 +1078,19 @@ cmds.offline = async (args, json) => {
   const action = args._[0] || "list";
   if (action === "add") {
     const url = args._[1];
-    if (!url) { console.error("Usage: bdp offline add <http_url> [--path /保存目录]"); process.exit(1); }
+    if (!url) { console.error("Usage: bdp offline add <http_url> [--path /保存目录] [--yes]"); process.exit(1); }
+    let safeUrl;
+    try {
+      safeUrl = assertSafeOfflineUrl(url);
+    } catch (e) {
+      if (json || args.flags.jsonFile) emitJson({ error: e.message }, args);
+      else console.error("[ERROR] " + e.message);
+      return 1;
+    }
+    // 离线下载 = 让百度服务器去取任意 URL 并落进网盘，必须显式确认
+    if (!(await requireYes(args, json, "创建离线下载任务", "百度服务器会代为抓取该 URL 并保存到网盘"))) return 1;
     // --path 在 parseArgs 里落到 flags.p（不是 flags.path），写错会静默丢掉保存目录
-    const r = pcsExtra.offlineAdd(url, args.flags.p || args.flags.path);
+    const r = pcsExtra.offlineAdd(safeUrl, args.flags.p || args.flags.path);
     output(r, json, () => console.log(`✅ 离线任务已创建: taskId=${r.taskId} (${url})${r.savePath ? ` → ${r.savePath}` : ""}`));
   } else if (action === "list") {
     const r = pcsExtra.offlineList();
@@ -1058,7 +1110,9 @@ cmds.share = async (args, json) => {
   const action = args._[0] || "list";
   if (action === "set") {
     const p = args._[1];
-    if (!p) { console.error("Usage: bdp share set <path> [--pwd 提取码] [--combined]"); process.exit(1); }
+    if (!p) { console.error("Usage: bdp share set <path> [--pwd 提取码] [--combined] [--yes]"); process.exit(1); }
+    // 创建公开分享 = 对外暴露数据，必须显式确认
+    if (!(await requireYes(args, json, "创建公开分享链接", "分享后任何拿到链接的人都能访问该文件"))) return 1;
     const r = pcsExtra.shareSet(p, args.flags.pwd, { combined: args.flags.combined });
     output(r, json, () => {
       const link = r.combined ? `${r.link}?pwd=${r.pwd}` : r.link;
@@ -1923,8 +1977,8 @@ const COMMANDS = {
     group: "pan",
     usage: "bdp offline add <http_url> [--path /目录] | bdp offline list",
     desc: "离线下载（百度服务器代下）",
-    flags: ["p"],
-    options: ["--path <dir> 保存目录"],
+    flags: ["p", "yes"],
+    options: ["--path <dir> 保存目录", "--yes 创建离线任务时显式确认"],
     examples: ["bdp offline add http://example.com/big.iso --path /下载", "bdp offline list"],
   },
   recycle: {
@@ -1940,9 +1994,9 @@ const COMMANDS = {
     group: "pan",
     usage: "bdp share set <path> [--pwd P] | bdp share cancel <id>... | bdp share list",
     desc: "分享管理（创建/取消/列出）",
-    flags: ["pwd", "combined", "page"],
-    note: "share list 走网页 API（BaiduPCS-Go v4.0.1 引擎的 share list 有 panic bug，网页 API 正常）",
-    options: ["--pwd <P>    提取码", "--combined  输出带提取码的链接"],
+    flags: ["pwd", "combined", "page", "yes"],
+    note: "share set 创建公开链接，非交互环境必须加 --yes；share list 走网页 API（BaiduPCS-Go v4.0.1 引擎的 share list 有 panic bug，网页 API 正常）",
+    options: ["--pwd <P>    提取码", "--combined  输出带提取码的链接", "--yes      创建公开分享时显式确认"],
     examples: ["bdp share set /文档/报告.pdf --pwd 1234 --combined", "bdp share cancel 23220383577"],
   },
   groups: {

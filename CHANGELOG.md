@@ -35,6 +35,35 @@
 - `skills/baiduwangpan/README.md` 仍写「10 个带 schema 的工具」→ 改为 18 个。
 - `examples.md` 的 `ls` 示例：`mtime` 实为**毫秒**，`totalText` 实为**体积**（不是文件计数）。
 
+### 🔒 第二轮红队审核的修复
+
+- **`bdp_rename` 的「只改文件名」可被 `..` 绕过**：守卫只查 `/` 与 `\`，而 `..` 两者都不含；
+  实测百度引擎会归一化 `..`（`ls /med/..` 返回根目录）→ 一次「改名」就能把文件挪出目录树，
+  绕过 `bdp_move` 的显式跨目录语义。现在拒绝 `.` / `..` / 含控制字符的目标名，
+  并对 `from` 本身做 `..` 归一化。
+- **净化过度 → 路径不再可寻址**：原 `CONTROL_RE` 把 ZWSP/ZWNJ/LRM/RLM/软连字符等**合法排版字符**
+  一并删掉（波斯语/维吾尔语/库尔德语、部分印度文字、Office 导出文件名常见），
+  Agent 拿净化后的路径再也找不到那个文件。现在只删终端控制字符与**方向控制符**
+  （RLO/LRE/isolate）+ BOM，其余保留。
+- **CLI 的 `ls --json` / `search --json` 完全不净化文件名**（RLO 原样进入 Agent 上下文，
+  可把 `.exe` 伪装成 `.png`）——此前只有人读通道净化了。现在净化下沉到数据源头
+  （`lib/pan.js` 的 `lsEntries`/`searchEntries`），两条通道一致。
+- **`pcsPath` 是前缀匹配**：`BaiduPCS-GoX.exe` / `BaiduPCS-Gonevil.exe` 都能通过 →
+  重新打开「任意 exe 启动器」。现在必须精确匹配引擎名（允许版本/平台后缀）。
+- **`share set`（创建公开分享链接）没有任何确认闸门**：它让任意网盘文件变成对外可访问的链接，
+  配合提示注入即构成完整外泄链。现在与 `rm` 同款 `--yes` 闸门。
+- **`offline add` 无闸门且可打内网地址**：百度服务器去取任意 URL（含 `169.254.169.254`），
+  结果落进网盘 → SSRF 跳板 + 二段式载荷。现在拒绝非 http(s) 与内网/本机地址，并要求 `--yes`。
+- **`recycle restore` 批量还原无闸门**：还原会复活已删文件且可能覆盖同名现存文件。
+  现在还原超过 1 项需要 `--yes`。
+- **MCP 写工具把控制字符原样交给引擎，回报值与实际执行不一致**：
+  现在统一校验路径（`assertSafePanPath`），回报 = 实参。
+- **MCP 的 `depth` 无上限**：一次调用即可触发近乎全树的遍历（DoS 面）。现在钳制到 32。
+- **MCP 返回值里的 `__proto__` 会变成原型**：现在用无原型对象构造，跳过 `__proto__` 键。
+- **引擎原文（`raw`）未加边界标记**：引擎原文里混着网盘文件名与路径文本，现已纳入标记范围。
+- **下载超时是墙钟总时长**（弱网下 4MB 分块需 >34KB/s）：默认放宽到 300s，可用
+  `BDP_DOWNLOAD_TIMEOUT_MS` 调整。
+
 ### ⚡ 性能（按性能剖析报告落地）
 
 - **`/api/list` 分页大小 100 → 500**（`lib/http.js` 集中定义 `API_LIST_PAGE_SIZE`）：
@@ -55,7 +84,7 @@
 
 ### 🧪 测试
 
-263 → **270 全绿**（新增 7 条：POST method/body 透传、UTF-8 尾部截断编码判定、GBK 不被误裁、markUntrusted、目录 dry-run 不落盘）
+263 → **282 全绿**（新增 19 条：POST method/body 透传、UTF-8 尾部截断编码判定、GBK 不被误裁、markUntrusted、目录 dry-run 不落盘、rename 的 `..`/控制字符绕过、from 归一化、move/copy 控制字符、MCP depth 钳制、pcsPath 精确匹配、净化策略（保留合法排版字符）、`__proto__` 不成原型、share/offline/recycle-restore 的确认闸门、offline 拒绝内网地址）
 
 ---
 ## v1.8.4 — 2026-11-02

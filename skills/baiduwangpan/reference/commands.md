@@ -471,9 +471,11 @@ bdp du / --progress               # 实时进度
 
 ```
 bdp recycle list [--page N]
-bdp recycle restore <fs_id>...
+bdp recycle restore <fs_id>... [--yes]
 bdp recycle clean --yes
 ```
+
+> **还原超过 1 项需要 `--yes`**（还原会复活已删文件，且可能覆盖同名现存文件）。
 
 - 删除的文件先进回收站（保留 60 天，仍占容量）—— 容量不足时先看这里
 - `clean` 清空回收站释放容量，**不可恢复**；非交互环境必须显式加 `--yes`，否则拒绝执行并返回退出码 1
@@ -496,20 +498,23 @@ bdp quota
 ### offline — 离线下载
 
 ```
-bdp offline add <http_url> [--path /保存目录]
+bdp offline add <http_url> [--path /保存目录] [--yes]
 bdp offline list
 ```
 
 - 百度服务器代下，不占本地带宽；`--path` 指定保存目录（缺省引擎默认位置）
+- ⚠️ **创建离线任务需要 `--yes`**（非交互环境），且**拒绝**非 http(s) 与内网/本机地址
+  （如 `169.254.169.254`、`127.0.0.1`、`192.168.*`、`file://`）——否则百度服务器会变成 SSRF 跳板
 
 ### share — 分享管理
 
 ```
-bdp share set <path> [--pwd 提取码] [--combined]
+bdp share set <path> [--pwd 提取码] [--combined] [--yes]
 bdp share cancel <shareId> [shareId2 ...]
 bdp share list
 ```
 
+- ⚠️ **创建公开分享链接需要 `--yes`**（非交互环境）—— 链接一旦生成，任何拿到它的人都能访问该文件
 - `--combined` 直接输出带提取码的可复制链接
 - `share list` 走**网页 API** `/share/record`（v1.7.0 起）。
   BaiduPCS-Go v4.0.1 引擎的 `share list` 有 panic bug，网页 API 正常，
