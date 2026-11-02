@@ -2505,6 +2505,24 @@ async function main() {
     process.exit(0);
   }
 
+  // 只给了全局选项却没给命令 → **必须报错**（退出码 1）。
+  //
+  // ⚠️ 这个检查必须放在**切换 profile 之前** —— 否则 `bdp --profile x` 会先
+  // 建出并激活一个垃圾 profile（名字可能还是打错的），然后打印帮助、退出 0：
+  // Agent 会把它当成「成功」，而用户配置里多了一个从没想建过的账号。
+  //
+  // 注意 `--profile` 被前置换到 profileName（**不进** preCommandFlags），
+  // 所以必须单独判它 —— 否则「只给 --profile 不给命令」会漏网。
+  if (!command && (preCommandFlags.length > 0 || profileName !== undefined)) {
+    const given = preCommandFlags.slice();
+    if (profileName !== undefined) given.push("--profile " + profileName);
+    const msg =
+      "缺少命令（只给了全局选项: " + given.join(" ") + "）。用 bdp help 查看全部命令。";
+    if (args.flags.json) emitJson({ error: msg }, args);
+    else console.error("[ERROR] " + msg);
+    process.exit(1);
+  }
+
   // 切换账号 profile（须在命令 handler 之前，get()/isLoggedIn() 自动生效）
   const profile = profileName !== undefined ? profileName : args.flags.profile;
   if (profile !== undefined) {
@@ -2533,16 +2551,8 @@ async function main() {
       console.log(HELP);
       process.exit(1);
     }
-    // 只给了全局开关却没给命令 → **必须报错**（退出码 1）。
-    // 否则 Agent 会拿到「退出码 0 + 纯文本帮助」：既像成功、又无法 JSON.parse，诊断线索全丢
-    // —— 比直接报「未知命令」更糟。（裸跑 bdp 无参数仍保持「打印 HELP + 退出 0」的惯例）
-    if (preCommandFlags.length > 0) {
-      const msg =
-        "缺少命令（只给了全局选项: " + preCommandFlags.join(" ") + "）。用 bdp help 查看全部命令。";
-      if (args.flags.json) emitJson({ error: msg }, args);
-      else console.error("[ERROR] " + msg);
-      process.exit(1);
-    }
+    // 只给了全局开关却没给命令 → 已在**切换 profile 之前**检查过（见上）。
+    // （裸跑 bdp 无参数仍保持「打印 HELP + 退出 0」的惯例）
     console.log(HELP);
     process.exit(0);
   }
