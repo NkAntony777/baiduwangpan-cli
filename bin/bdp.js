@@ -88,7 +88,7 @@ function assertSafeOfflineUrl(url) {
 // markUntrusted（lib/sanitize.js）：CLI 的 JSON 通道把「来自网盘的正文」包上
 // <untrusted_file>…</untrusted_file> 边界标记，与 MCP 侧（lib/mcp.js 的 sanitizeToolResult）行为一致 ——
 // Agent 读到的正文一律是**数据**，不是可以执行的指令（防间接提示注入）。
-const { sanitizeControl, markUntrusted } = require("../lib/sanitize");
+const { sanitizeControl, markUntrusted, redactLocalPaths } = require("../lib/sanitize");
 
 // ── Utils ──────────────────────────────────────────────
 
@@ -132,6 +132,36 @@ function verboseLog(args, msg) {
   if (args.flags.verbose) process.stderr.write(`[verbose] ${msg}\n`);
 }
 
+// ── 选项取值校验（v1.10.1 / T-06、T-07）────────────────────────────
+//
+// 为什么需要：取值缺失 / 为空 / 以 `--` 开头时，flag 会把「下一个 flag」当成取值 ——
+//   - `bdp error -3 --profile --json` 曾把 "--json" 建成一个垃圾 profile 并**激活**它
+//     （正是 v1.9.2 声称修复的同一个 bug，只修了前置位 —— 这就是本卡要补的后置位）；
+//   - `bdp --json-file --json error -3` 曾把 "--json" 当成输出文件名，
+//     在当前目录**真的建出一个名为 `--json` 的文件**（实测确认）。
+//
+// 前置与后置两条解析路径**共用**这一个实现 —— 只修一半会重演同样的 bug。
+//
+// 返回 null 表示合法；否则返回可直接展示给用户的错误信息。
+function flagValueError(flag, val, hint) {
+  const suffix = hint ? "（" + hint + "）" : "";
+  if (val === undefined) return flag + " 需要一个取值" + suffix;
+  if (val === "") return flag + " 的取值不能为空" + suffix;
+  if (typeof val === "string" && val.startsWith("--")) {
+    return flag + " 的取值不能以 -- 开头（收到 \"" + val + "\"）" + suffix;
+  }
+  return null;
+}
+
+// 选项取值非法 —— 与普通运行时错误区分开（CLI 需要用不同的方式呈现）
+class FlagValueError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "FlagValueError";
+    this.flagValueError = true;
+  }
+}
+
 function parseArgs(argv) {
   const opts = { _: [], flags: {} };
   // "--" 之后一律按位置参数处理（如 bdp error -- -3）
@@ -145,7 +175,12 @@ function parseArgs(argv) {
     } else if (arg === "--legacy-json") {
       opts.flags.legacyJson = true;
     } else if (arg === "--json-file") {
-      opts.flags.jsonFile = argv[++i];
+      // 取值不能是另一个 flag（否则会把 "--json" 当成输出文件名，真的建出垃圾文件）
+      const fileVal = argv[i + 1];
+      const fileErr = flagValueError("--json-file", fileVal, "用 bdp --json-file <路径> 指定输出文件");
+      if (fileErr) throw new FlagValueError(fileErr);
+      opts.flags.jsonFile = fileVal;
+      i++;
     } else if (arg === "--no-meta") {
       opts.flags.noMeta = true;
     } else if (arg === "--version" || arg === "-v") {
@@ -286,7 +321,12 @@ function parseArgs(argv) {
     } else if (arg === "--show-secrets") {
       opts.flags.showSecrets = true;
     } else if (arg === "--profile") {
-      opts.flags.profile = argv[++i];
+      // 取值不能是另一个 flag（否则会把 "--json" 建成一个垃圾 profile 并激活它）
+      const profVal = argv[i + 1];
+      const profErr = flagValueError("--profile", profVal, "用 bdp profile list 查看已有的 profile");
+      if (profErr) throw new FlagValueError(profErr);
+      opts.flags.profile = profVal;
+      i++;
     } else if (arg === "--from-uk") {
       opts.flags.fromUk = argv[++i];
     } else if (arg === "--msg-id") {
@@ -2096,7 +2136,7 @@ const COMMANDS = {
     //  按分组找命令的人根本不会去群聊里找「错误码释义」。）
     group: "config",
     usage: "bdp error [<code>] | bdp error --list",
-    desc: "解释错误码（--json 返回 code/name/description/severity/retryable/action；--verbose 附带 internalDetail）",
+    desc: "解释错误码（--json 返回 code/codeText/name/description/severity/retryable/action；--verbose 附带 internalDetail）",
     note: "不填 <code> 时默认解释 -3；--verbose 会附带 internalDetail（实测记录/实现坑），默认不下发。",
     flags: ["list"],
     options: [
@@ -2390,12 +2430,13 @@ async function main() {
       // 值不像 profile 名（缺失 / 空 / 以 -- 开头）→ **明确报错**。
       // 否则 `bdp --profile --json error -3` 会把 "--json" 当成 profile 名，
       // 在用户配置里建出一个叫 "--json" 的垃圾 profile 并激活它（实测确认过）。
-      if (val === undefined || val === "" || val.startsWith("--")) {
-        const msg = "--profile 需要一个 profile 名（用 bdp profile list 查看已有的 profile）";
+      // 校验与**后置**解析共用 flagValueError —— 只修一半会重演同样的 bug。
+      const profErr = flagValueError("--profile", val, "用 bdp profile list 查看已有的 profile");
+      if (profErr) {
         if (preCommandFlags.includes("--json")) {
-          console.log(JSON.stringify(withMeta({ error: msg }, jsonCtx), null, 2));
+          console.log(JSON.stringify(withMeta({ error: profErr }, jsonCtx), null, 2));
         } else {
-          console.error("[ERROR] " + msg);
+          console.error("[ERROR] " + profErr);
         }
         process.exit(1);
       }
@@ -2404,14 +2445,42 @@ async function main() {
       absorbed = true;
     }
     if (rest[0] === "--json-file" && !preCommandFlags.includes("--json-file")) {
-      preCommandFlags.push("--json-file", rest[1]);
+      // 取值不能是另一个 flag —— 否则 `bdp --json-file --json error -3` 会把 "--json"
+      // 当成输出文件名，在当前目录**真的建出**一个名为 `--json` 的文件（实测确认）。
+      const fileVal = rest[1];
+      const fileErr = flagValueError("--json-file", fileVal, "用 bdp --json-file <路径> 指定输出文件");
+      if (fileErr) {
+        if (preCommandFlags.includes("--json")) {
+          console.log(JSON.stringify(withMeta({ error: fileErr }, jsonCtx), null, 2));
+        } else {
+          console.error("[ERROR] " + fileErr);
+        }
+        process.exit(1);
+      }
+      preCommandFlags.push("--json-file", fileVal);
       rest = rest.slice(2);
       absorbed = true;
     }
   }
 
   const command = rest[0];
-  const args = parseArgs(rest.slice(1).concat(preCommandFlags));
+  let args;
+  try {
+    args = parseArgs(rest.slice(1).concat(preCommandFlags));
+  } catch (e) {
+    // 选项取值非法（如后置位的 `--profile --json`）→ **明确报错**退出 1。
+    // 绝不能把下一个 flag 当成取值：那会建出垃圾 profile（并激活它）或垃圾文件。
+    if (e && e.flagValueError) {
+      const msg = e.message;
+      if (argv.includes("--json")) {
+        console.log(JSON.stringify(withMeta({ error: msg }, jsonCtx), null, 2));
+      } else {
+        console.error("[ERROR] " + msg);
+      }
+      process.exit(1);
+    }
+    throw e;
+  }
   const json = args.flags.json || false;
 
   // bdp --version：此前版本号只能从 `bdp help --json` 里刨
@@ -2483,14 +2552,16 @@ async function main() {
       const info = hasErrno ? errorCodes.describeError(e.errno, { verbose: !!args.flags.verbose }) : null;
       emitJson(
         Object.assign(
-          { error: e && e.message ? e.message : String(e) },
+          { error: redactLocalPaths(e && e.message ? e.message : String(e)) },
           hasErrno ? { errno: e.errno } : {},
           info ? { errorCode: info } : {}
         ),
         args
       );
     } else {
-      console.error("[ERROR] " + e.message);
+      // CLI 侧同样要脱敏本地绝对路径（与 MCP 侧共用 redactLocalPaths —— v1.10.1 / T-05）：
+      // 引擎缺失时 stderr 会打印完整绝对路径（含 Windows 用户名）。
+      console.error("[ERROR] " + redactLocalPaths(e.message));
     }
     exitCode = 1;
   } finally {

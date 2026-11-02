@@ -158,7 +158,18 @@ bdp gdownload 539478953581833690 954615608563687 -o ./downloads
 
 | 改进 | 说明 |
 |:-----|:-----|
-| **并发不再等于串行** | 引擎调用此前用 `spawnSync`，一次 `ls /` 冻结事件循环 594ms —— MCP 单进程下所有并发请求全部排队（8 并发 4047ms，加速比 **1.0×**）。现改用异步 spawn：**8 并发 554ms（7.3×）**，输出逐字节不变 |
+| **并发不再等于串行** | 引擎调用此前用 `spawnSync`，一次 `ls /` 冻结事件循环 594ms —— MCP 单进程下所有并发请求全部排队（8 并发 4047ms，加速比 **1.0×**）。现改用异步 spawn，**输出逐字节不变** |
+
+**并发基准**（实测；**同一台机器、同一网盘账号**；改前 = `spawnSync`，改后 = 异步 spawn）：
+
+| 并发数 | 改前 | 改后 |
+|:---|:---|:---|
+| 1 | 436ms | ~470ms |
+| 2 | 869ms | 460ms |
+| 4 | 1733ms | 441ms |
+| 8 | **4047ms** | **554ms（7.3×）** |
+
+> 事件循环也不再被冻结：8 并发期间定时器触发 **52 次**（改前**单次**调用就是 0 次）。
 
 ## 🆕 v1.9.2 新增（错误码分层）
 
@@ -311,7 +322,7 @@ bdp gdownload <gid> <fs_id>...   直接下载群文件到本地 (逆向 /api/sha
                                   单文件直下；多个 fs_id（同消息）自动 zip 打包下载
                                   [-o dir] [--filename NAME] [--from-uk X] [--msg-id Y] [--no-cache]
 bdp cache [clear]                查看 / 清空会话缓存 (~/.bdp/cache/)
-bdp error <code> [--json]       解释错误码 (结构化: code/name/severity/retryable/action)
+bdp error <code> [--json]       解释错误码 (结构化: code/codeText/name/description/severity/retryable/action)
 bdp error --list [--json]       列出全部已知错误码
 ```
 
@@ -322,6 +333,8 @@ bdp error --list [--json]       列出全部已知错误码
 > - 详见 `docs/group-download-final-verdict.md`
 
 ### 通用选项
+
+> 当前共 **37** 条 CLI 命令、**19** 个 MCP 工具、**13** 个内置错误码。
 
 ```
 --json                           JSON 结构化输出 (Agent 友好)
@@ -361,6 +374,17 @@ bdp error --list [--json]       列出全部已知错误码
 --exact                           按文件名精确匹配，忽略路径前缀 (gsearch; 大小写不敏感)
 --no-cache                       禁用会话缓存 (gsearch/gtree/gshares/gls)
 ```
+
+> **全局选项位置自由**：`--json` / `--verbose` / `--no-meta` / `--legacy-json` / `--profile <name>` /
+> `--json-file <path>` 都可以放在**命令之前**，也可以放在命令之后，布尔开关与带值选项**可任意交错**
+> （如 `bdp --json --profile x error -3`）。带值选项的取值**不能以 `--` 开头** —— 否则报错退出 1。
+>
+> **只给开关不给命令 → 退出码 1**：`bdp --json`（给了全局选项但没给命令）会报「缺少命令」并**退出码 1**，
+> `--json` 下返回 JSON 错误体。裸跑 `bdp`（一个参数都不给）仍打印帮助并**退出码 0**。
+>
+> **已知遗留（同步引擎路径）**：`quota` / `get` / `put` / `mkdir` / `rm` / `mv` / `cp` / `offline` /
+> `share` / `recycle` 这 10 条命令的引擎路径**仍是同步的**（`ls` / `search` 已改异步）。
+> 它们要么低频、要么是写操作（本就不该并发），迁移列入 v1.11.0。
 
 ### get 下载可靠性（v1.2.0）
 

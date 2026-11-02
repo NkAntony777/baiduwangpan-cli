@@ -218,7 +218,7 @@ bdp organize [path] --by type --apply --yes   # 执行（真实移动网盘文�
 v1.9.0 起，每条命令的 `--json` 输出都会**追加**一个 `meta` 字段（只追加，不改任何既有字段）：
 
 ```json
-"meta": { "command": "ls", "version": "1.9.0", "profile": null, "elapsedMs": 42 }
+"meta": { "command": "ls", "version": "1.10.1", "profile": null, "elapsedMs": 42 }
 ```
 
 | 字段 | 含义 |
@@ -232,6 +232,33 @@ v1.9.0 起，每条命令的 `--json` 输出都会**追加**一个 `meta` 字段
 > 注：以下返回**裸数组**的历史接口不加 meta（加了就破坏既有消费方）：
 > `bdp groups` / `bdp gshares` / `bdp gls --legacy-json` / `bdp gsearch --legacy-json` / `bdp share cancel`。
 > `--legacy-json` 只有 `gls` / `gsearch` 认，其它命令传了也不报错但形状不变。
+
+### 全局选项、退出码与已知遗留
+
+**全局选项位置自由**：`--json` / `--verbose` / `--no-meta` / `--legacy-json` / `--profile <name>` /
+`--json-file <path>` 都可以放在**命令之前**，也可以放在命令之后，布尔开关与带值选项**可任意交错**：
+
+```bash
+bdp --json ls                       # 布尔开关在命令前
+bdp --profile work ls                # 带值选项在命令前
+bdp --json --profile x error -3      # 两者交错也可以
+bdp ls --json --profile x            # 也可以都在命令后
+```
+
+> 带值选项的取值**不能以 `--` 开头** —— `bdp error -3 --profile --json` 会**报错退出 1**
+> （此前会把 "--json" 建成一个垃圾 profile 并激活它）；
+> `bdp --json-file --json error -3` 同理不会建出名为 `--json` 的文件。
+
+**只给开关不给命令 → 退出码 1**：
+
+```bash
+bdp --json        # → 报「缺少命令」，退出码 1（--json 下返回 JSON 错误体）
+bdp               # → 打印帮助，退出码 0（裸跑惯例）
+```
+
+**已知遗留（同步引擎路径）**：`quota` / `get` / `put` / `mkdir` / `rm` / `mv` / `cp` / `offline` /
+`share` / `recycle` 这 10 条命令的引擎路径**仍是同步的**（`ls` / `search` 已改异步）。
+它们要么低频、要么是写操作（本就不该并发），迁移列入 v1.11.0。
 
 ### serve — MCP 服务器（stdio / HTTP）
 
@@ -534,6 +561,7 @@ bdp error --list --json     # 列出全部已知错误码
 | 字段 | 含义 |
 |:-----|:-----|
 | `code` | **数值**错误码（MCP 侧同样保证是数值） |
+| `codeText` | 原样保留的输入文本（恒为字符串）；需要字符串形态的错误码时用它 |
 | `name` | 稳定标识符（如 `FILE_NOT_FOUND`），便于程序判断 |
 | `severity` | `retryable`（退避重试可能成功）/ `fatal`（**重试同一个调用无意义**，但必须按 `action` 让用户介入）/ `user-error`（请求本身有问题，别重试）/ `unknown` |
 | `retryable` | `severity === "retryable"` 的布尔快捷方式 |
@@ -548,7 +576,9 @@ bdp error --list --json     # 列出全部已知错误码
 > **取值口径**（CLI 与 MCP 一致）：
 > - `code` 接受 `31066` / `errno=31066` / `errno = -3` 三种写法；其它写法（如 `abc31066`）判为**未登记**
 >   —— 不会从任意字符串里抽数字去猜（那会给出错误的确切错误码）。
-> - `list` / `verbose` 是布尔参数：接受 `true` / `false` / `1` / `0` / `"true"` / `"false"` / `"1"` / `"0"`。
+> - `list` / `verbose` 是布尔参数：接受 `true` / `false` / `1` / `0` / `"true"` / `"false"` / `"1"` / `"0"`
+>   / `yes` / `no` / `on` / `off` / `""`（空字符串）。**大小写不敏感，且忽略首尾空白**
+>   （如 `" TRUE "` 视为 `true`；`""` 视为 `false`）。
 >   MCP 侧收到无法识别的值会报 `-32001`（**不静默降级** —— 静默降级会让 Agent 以为参数生效了）。
 > - `list` 与 `code` 同时给时**以 `list` 为准**（`code` 被忽略）。
 > 工具执行失败时，MCP 返回 `{ "error": { code, name, message, severity, retryable, action }, "meta": {...} }`，
@@ -561,7 +591,7 @@ bdp error --list --json     # 列出全部已知错误码
   "error": "文件或目录不存在",
   "errno": 31066,
   "errorCode": { "code": 31066, "name": "FILE_NOT_FOUND", "severity": "user-error", "retryable": false, "action": "…" },
-  "meta": { "command": "ls", "version": "1.10.0", "profile": null, "elapsedMs": 12 }
+  "meta": { "command": "ls", "version": "1.10.1", "profile": null, "elapsedMs": 12 }
 }
 ```
 
@@ -673,3 +703,32 @@ bdp gtree 539478953581833690 --depth 2 --json
 ```
 
 > gsearch 的 --depth N 可递归搜索深层目录（默认 1）。深度越大请求数越多，稀疏关键词可用 gtree 建树后定位再深入。
+
+### gdownload — 直接下载群文件（免转存）
+
+```
+bdp gdownload <gid> <fs_id>... [-o <dir>] [--filename NAME] [--from-uk X] [--msg-id Y] [--no-cache]
+```
+
+- 逆向 `/api/sharedownload`，**直接下载**群文件 —— **不需要先转存到自己的网盘**
+- 单文件直下；多个 `fs_id`（同一条消息）自动 zip 打包下载
+- 限制（实测，2026-08）：单文件 ≤ ~20MB；同消息多文件总包 ≤ ~100MB；更大的文件受百度限制
+
+```bash
+bdp gdownload 539478953581833690 1234567890 -o ./downloads
+```
+
+### cache — 群会话缓存
+
+```
+bdp cache [clear]
+```
+
+- 查看 / 清空群聊会话缓存（`~/.bdp/cache/`）
+- 目录缓存 TTL 30 分钟、分享库缓存 5 分钟；`--no-cache` 可绕过
+- `clear` 清空整个缓存目录
+
+```bash
+bdp cache        # 查看当前缓存
+bdp cache clear  # 清空
+```

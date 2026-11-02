@@ -4,6 +4,82 @@
 
 -----
 
+## v1.10.1 — 2026-11-02
+
+> 主题：**止血与对齐** —— 修掉 v1.10.0 异步化引入的 2 个 P0 回归，
+> 一次清干净 9 项文档漂移，并给「文档漂移」装上**自动守门**。
+
+### 🔧 修复
+
+- **引擎输出超限 → 明确错误，不再返回「空成功」**（P0-1，v1.10.0 引入的回归）：
+  引擎 stdout 超过 20MB 时，此前输出被丢弃而 `truncated` 标志**无人读取** ——
+  MCP 返回 `{"path":"/","total":0,"entries":[]}` 且 `isError:false`，
+  Agent 会据此得出「目录是空的」这个**确定性错误结论**。
+  现在超限抛明确错误（`error.message` 含「20MB」，`error.code` = `-32000`），
+  **不再出现 `total:0` 的静默成功**。同步版的 `ENOBUFS` 也从「误报成引擎不存在」
+  改成「输出超限」。
+- **引擎挂死 → timeout 内明确失败**（P0-2，v1.10.0 引入的回归）：
+  异步 spawn 此前**没有 timeout** → 引擎挂死 → Promise 永不 settle →
+  MCP 闸门槽位**永不释放** → **4 个挂死即整个 MCP 服务器永久不可用**。
+  现在引擎调用带超时（读操作 120s、写操作 600s，可用 `BDP_ENGINE_TIMEOUT_MS` /
+  `BDP_ENGINE_TIMEOUT_SLOW_MS` 覆盖），超时 kill 子进程并抛明确错误
+  （`severity: retryable` —— 引擎挂死是环境问题，Agent 退避重试是有意义的）。
+- **stderr 与 stdout 同为 20MB 上限**（P1-4）：
+  `child.stderr` 此前**完全无上限**（实测 60MB stderr 全保留，RSS +121MB）。
+  现在两者同上限，超限一律转成明确错误。
+- **stdio 传输补上并发闸门**（P1-3）：
+  闸门此前**只覆盖 HTTP 路径** —— 实测 12 个并发 `bdp_ls` 起到 **12 个同时存活的引擎进程**
+  （stdio 是 MCP 默认传输，也是 Agent 最常用的接法）。
+  现在 stdio 与 HTTP 走**同一段闸门逻辑**，并发上限统一由 `BDP_MCP_MAX_CONCURRENCY` 控制
+  （默认 4）。口径说明：限的是**工具调用总数**，不是引擎进程数。
+- **路径脱敏抽公共函数，CLI 与 MCP 共用**（P1-5）：
+  MCP 侧的正则以**空白**为终止符 → 含空格的路径（`C:\Program Files\...`）
+  只遮蔽第一段，残留目录结构与文件名；CLI 侧顶层 catch **完全不做脱敏**。
+  现在统一走 `lib/sanitize.js` 的 `redactLocalPaths()`，两侧对同一输入产出一致结果。
+- **后置 `--profile` 取值校验**（P2-6）：
+  `bdp error -3 --profile --json` 此前会把 `--json` 建成一个垃圾 profile 并**激活**它
+  （正是 v1.9.2 声称修复的同一个 bug —— 只修了前置位）。
+  现在前置/后置**共用**同一个校验函数，缺值也报错退出 1。
+- **`--json-file` 取值校验**（P2-7）：
+  `bdp --json-file --json error -3` 此前会把 `--json` 当成输出文件名，
+  在当前目录**真的建出**一个名为 `--json` 的文件。现在同样报错退出 1。
+
+### 📚 文档
+
+- `bdp error` 字段清单**四处逐字段一致**（`bdp help error` / SKILL.md / commands.md / README）：
+  此前 README / SKILL.md / commands.md / `bdp help error` 各漏了 `codeText` 或 `description`。
+- `meta.version` 示例统一到 1.10.1（`commands.md` / `examples.md` 两处此前仍是 1.9.0）。
+- 布尔取值集合补全（`yes`/`no`/`on`/`off`/`""`），并写明**大小写不敏感、忽略首尾空白**。
+- 补三段此前**任何用户可见文档都没写**的语义：
+  ①「只给开关不给命令 → 退出码 1」（裸跑 `bdp` 仍打印帮助并退出 0）；
+  ②全局选项的前置能力（含此前漏掉的 `--profile` / `--json-file`）；
+  ③`bdp error` 的 code 取值规则（只接受 纯数字 / `errno=NNN` / `errno = -3`）。
+- **同步遗留清单补全**（README / SKILL.md / commands.md 三处一致）：
+  `quota`/`get`/`put`/`mkdir`/`rm`/`mv`/`cp`/`offline`/`share`/`recycle` 共 **10** 条
+  （原清单漏了 `offline`/`share`/`recycle`）。
+- v1.10.0 性能摘要补齐 1/2/4 并发档、52 次定时器与**测量环境口径**；
+  `commands.md` 补上此前缺失的 `gdownload` / `cache` 两节。
+
+### 🧪 测试
+
+- 新增 `test/doc-contract.test.js`（7 条）—— **文档契约测试**（F22）：
+  自动断言「字段清单四处一致 / 运行时键集 == 文档字段表 / 数量口径 / 版本号 / zip 逐字节一致」。
+  **判据**：把 `commands.md` 里的 `codeText` 删掉 → 测试**必须失败**（已实测）。
+- 新增 `test/mcp-concurrency.test.js`（2 条）+ `test/mcp-concurrency-env.test.js`（1 条）：
+  stdio 并发闸门（≤4）与 `BDP_MCP_MAX_CONCURRENCY` 生效。
+- 新增 `test/redact-paths.test.js`（3 条）：路径脱敏（CLI / MCP 两侧一致）。
+- 扩展 `test/async-engine.test.js`（7 → 14 条）：输出超限、stderr 上限、超时 + kill，
+  以及 MCP 层的 `isError` / `error.code === -32000` / `severity: retryable` 验收。
+- 测试总数 363 → **383**。
+
+### 📦 分发
+
+- 重新构建 `baiduwangpan-skill.zip`（随 `skills/` 变更同步，37,514 字节 / 8 个文件）。
+
+> **本版本尚未发布到 npm**（npm latest 仍为 1.8.5）。
+> 需要 1.9.x/1.10.x 的功能请从 GitHub tag 安装：
+> `npm install -g NkAntony777/baiduwangpan-cli#v1.10.1` 或等 npm 发布后再升级。
+
 ## v1.10.0 — 2026-11-02
 
 > 主题：**MCP 并发恢复** —— 把「Agent 调用效率」的真问题解决掉：引擎调用不再冻结事件循环。
@@ -40,8 +116,8 @@
   并发期间事件循环仍能转动、解析结果与同步版逐字段一致、引擎错误文本仍按 errno 判定。
   测试总数 356 → **363**。
 
-> **已知遗留**：`quota` / `get` / `put` / `mv` / `cp` / `rm` 的引擎路径仍是同步的
-> （`lib/pcs-extra.js` 与 `lib/pan.js` 里其余的 `runPCS` 调用点）。
+> **已知遗留**：`quota` / `get` / `put` / `mkdir` / `rm` / `mv` / `cp` / `offline` / `share` / `recycle`
+> 的引擎路径仍是同步的（`lib/pcs-extra.js` 与 `lib/pan.js` 里其余的 `runPCS` 调用点）。
 > 它们要么低频、要么是写操作（本就不该并发），故本版未动。
 
 > **本版本尚未发布到 npm**（npm latest 仍为 1.8.5）。
@@ -107,7 +183,7 @@
 - `bdp help error` 的 usage 改为 `bdp error [<code>]`，并注明不填时默认解释 `-3`。
 - `reference/commands.md` 补充取值口径（`code` 只接受三种写法、布尔参数取值集合、
   `list` 与 `code` 同给时以 `list` 为准）。
-- 重新构建 `baiduwangpan-skill.zip`（随 `skills/` 变更同步，35,726 字节 / 8 个文件）。
+- 重新构建 `baiduwangpan-skill.zip`（随 `skills/` 变更同步，35,727 字节 / 8 个文件）。
 
 ### 🧪 测试
 

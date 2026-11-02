@@ -103,6 +103,17 @@ v1.6.x 及更早版本里，`ls`/`get`/`put` 在失败时**仍返回退出码 0*
 
 **Agent 请务必检查退出码，不要只看 stdout 内容。**
 
+## 只给了开关没给命令？/ 全局选项放哪儿？
+
+- **只给全局开关不给命令 → 退出码 1**：`bdp --json` 会报「缺少命令」并**退出 1**
+  （`--json` 下返回 JSON 错误体）。裸跑 `bdp`（一个参数都不给）仍打印帮助并**退出 0**。
+- **全局选项位置自由**：`--json` / `--verbose` / `--no-meta` / `--legacy-json` / `--profile <name>` /
+  `--json-file <path>` 放在命令前后都可以，布尔开关与带值选项可任意交错
+  （如 `bdp --json --profile x error -3`）。
+- **带值选项的取值不能以 `--` 开头**：`bdp error -3 --profile --json` 报错退出 1
+  （此前会建出一个名为 `--json` 的垃圾 profile 并激活它）；
+  `bdp --json-file --json error -3` 同理不会建出名为 `--json` 的文件。
+
 ## du 的 size 比 quota 小很多？
 
 `bdp du` 靠递归 `/api/list` 求和（百度没有服务端目录大小接口），
