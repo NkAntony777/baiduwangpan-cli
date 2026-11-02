@@ -681,7 +681,7 @@ function printEntries(entries) {
 
 cmds.ls = async (args, json) => {
   const dirPath = args._[0] || "/";
-  const info = pan.lsEntries(dirPath);
+  const info = await pan.lsEntries(dirPath);
   if (json || args.flags.jsonFile) {
     emitJson({
       path: info.path,
@@ -718,7 +718,7 @@ cmds.search = async (args, json) => {
     engineKw = keyword.split(/\s+/)[0]; // 引擎只搜第一个词，客户端按 OR 过滤
   }
 
-  const info = pan.searchEntries(keyword, searchPath, {
+  const info = await pan.searchEntries(keyword, searchPath, {
     mode: mode || "substring",
     engineKeyword: engineKw,
   });
