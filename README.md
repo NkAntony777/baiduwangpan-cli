@@ -90,7 +90,7 @@ npm install        # postinstall 自动下载引擎
 npm link           # 全局注册 bdp 命令
 ```
 
-> **依赖**: Node.js 14+ 和 `curl`（已在 Windows 10+ / macOS / 大多数 Linux 预装）
+> **依赖**: Node.js 22.5+（推荐 24；`bdp index` / `bdp ask` 依赖内置 `node:sqlite`）和 `curl`（已在 Windows 10+ / macOS / 大多数 Linux 预装）
 
 ### 2. 配置认证
 
@@ -143,11 +143,27 @@ bdp gls 539478953581833690 742474845517885
 bdp gdownload 539478953581833690 954615608563687 -o ./downloads
 ```
 
+## 🆕 v1.8.4 新增（三路对抗性审核的修复）
+
+| 修复 | 说明 |
+|:-----|:-----|
+| **提示注入防线接线** | `sanitizeUntrusted` 此前是死代码 —— MCP 返回的正文裸奔。现所有返回值都清洗控制字符与 Unicode 格式字符，正文类字段包上 `<untrusted_file>…</untrusted_file>` 边界标记 |
+| **删除不再谎报成功** | 引擎退出码此前被忽略，引擎没真跑也报「✅ 已删除」。现按 BaiduPCS-Go 源码的成功标记判定，未确认即失败 |
+| **凭证不再被覆盖抹掉** | 配置损坏时 `config --set` 拒绝写入并告警；写入改为原子替换 |
+| **pcsPath 只认引擎** | `--set pcsPath` 只能指向文件名以 `BaiduPCS-Go` 开头的引擎 |
+| **rename 只改文件名** | MCP `bdp_rename` 目标含 `/` 会被拒绝，跨目录移动请用 `bdp_move` |
+| **回收站能列出文件** | md5 列的正则只认纯 hex，而百度返回混淆 md5 → 文件行被丢弃。现已放宽并反混淆 |
+| **offline --path 生效** | `bdp offline add --path <dir>` 的保存目录此前被静默丢弃 |
+| **体积上限按字节** | MCP HTTP 请求体 8MB 上限此前按 UTF-16 码元计，中文可放大 3 倍；超限现在真正返回 413 |
+| **recycle clean 要 --yes** | 与 `bdp rm` 一致的确认闸门 |
+
+> Node 版本要求已从 `>=14` 提升到 **>=22.5**（`bdp index` / `bdp ask` 依赖内置 `node:sqlite`）。
+
 ## 🆕 v1.8.x 新增（内容深度能力）
 
 | 能力 | 命令 | 说明 |
 |:-----|:-----|:-----|
-| **md5 反混淆** | 自动 | 百度返回的 md5 是混淆值 —— 同一内容在不同路径返回值不同。不解密就无法去重。算法移植自 BaiduPCS-Go 源码，用真实网盘数据验证 15/15 |
+| **md5 反混淆** | 自动 | 百度返回的 md5 是混淆值 —— 同一内容在不同路径返回值不同。不解密就无法去重。算法移植自 BaiduPCS-Go 源码，用真实网盘数据验证 9/9 |
 | **重复文件清理** | `bdp dedup /med` | 先 size 粗筛再 md5 精算，报告可释放空间；删除走回收站可恢复 |
 | **全类型预览** | `bdp preview /报告.pdf` | PDF 文本层（中文 CID 字体可还原）/ ZIP 中央目录 / DOCX / XLSX / EPUB / 图片尺寸 |
 | **本地全文索引** | `bdp index build /中医` | SQLite FTS5 + 中文二元分词，增量更新 |
@@ -212,7 +228,7 @@ bdp mv <src> <dst>               移动/重命名文件/目录
 bdp cp <src> <dst>               拷贝文件/目录
 bdp quota                        网盘配额 (总/已用/剩余)
 bdp du [path]                   目录容量分析 (递归统计, --depth/--top/--concurrency)
-bdp recycle list / restore <id>... / clean   回收站管理 (clean 不可恢复)
+bdp recycle list / restore <id>... / clean   回收站管理 (clean 不可恢复，需 --yes)
 bdp offline add <url> [--path D] 离线下载 (百度服务器代下)
 bdp offline list                 离线任务列表
 bdp share set <path> [--pwd P]   创建分享链接 [--combined 输出带密码链接]
@@ -272,15 +288,15 @@ bdp cache [clear]                查看 / 清空会话缓存 (~/.bdp/cache/)
 --exact                          整名精确匹配 (search/gsearch)
 --pwd <P>                        分享提取码 (share set)
 --combined                       输出带提取码的分享链接 (share set)
---dry-run                        模拟执行不落盘 (get/put/rm)
+--dry-run                        模拟执行不落盘 (get/put/rm/dedup)
 --profile <name>                 切换账号 profile (全局参数，命令前/后均可)
 --page <N>                       页码 (gls/gsearch, 默认 1)
 --page-size <N>                  每页条数 (gls, 默认 50, 最大 100)
---limit <N>                      每页条数 (gsearch, 默认 50)
---depth <N>                      递归深度 (gsearch 默认 1 / gtree 默认 2)
---concurrency <N>                并发扫描数 (gsearch/gtree, 默认 4, 1-8)
+--limit <N>                      每页条数 (search/gsearch 默认 50；ask 默认 20)
+--depth <N>                      递归深度 (gsearch 默认 1 / gtree 默认 2 / du 默认 3 / dedup 默认 12)
+--concurrency <N>                并发扫描数 (gsearch/gtree 默认 4，1-8；du/dedup 默认 8；get 分块默认 3)
 --max-nodes <N>                  树节点上限 (gtree, 默认 2000)
---max-pages <N>                  单目录最大页数 (gsearch/gtree, 默认 50, 100 条/页)
+--max-pages <N>                  单目录最大页数 (gsearch/gtree, 默认 50, 100 条/页)；preview 为 PDF 解析页数上限 (默认 200)
 --max-requests <N>               单命令请求预算 (gsearch/gtree, 默认 400, 防限流)
 --from-uk <X> / --msg-id <Y>     分享来源参数 (gls 子目录)
 --parent-fs-id <Z>               父目录 fsId (gls, errno=-3 时回退用)
@@ -338,7 +354,7 @@ bdp profile unset                                # 切回全局账号
 bdp quota                          # 总/已用/剩余（实测 99.78% 时优先排查下面两项）
 bdp recycle list                   # 回收站：删除的文件保留 60 天仍占容量，先看这里
 bdp recycle restore <fs_id>...     # 还原误删
-bdp recycle clean                  # 清空回收站释放容量（不可恢复，务必确认）
+bdp recycle clean --yes            # 清空回收站释放容量（不可恢复，非交互环境必须加 --yes）
 bdp du /                           # 顶层目录容量分布（找空间大户）
 bdp du /玄学 --depth 5 --top 20    # 深扫指定目录（深度封顶的子目录标 [深度封顶]）
 bdp du / --json                    # JSON 输出（Agent 可解析）

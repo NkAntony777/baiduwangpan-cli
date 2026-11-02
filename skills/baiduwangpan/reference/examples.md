@@ -39,7 +39,7 @@ bdp cat /文档/配置.json
 用户：**"在 /文档/日志.txt 里找一下 ERROR"**
 
 ```bash
-bdp grep "ERROR" /文档/日志.txt -n --json
+bdp grep "ERROR" /文档/日志.txt -N --json
 ```
 
 ## 场景 5：预览文件信息
@@ -69,7 +69,7 @@ bdp groups --json
 
 # 第二步：在该群内搜索
 bdp gsearch 539478953581833690 "倪海厦" --json
-# → [{"name":"N 倪海厦","path":"/全店svip200位大师课(共16T)/N 倪海厦",...}]
+# → {"results":[{"name":"N 倪海厦","path":"/全店svip200位大师课(共16T)/N 倪海厦",...}],"returned":1,"complete":true}
 
 # 第三步（可选）：浏览该目录的内容
 bdp gls 539478953581833690 292608024165826 --json
@@ -110,10 +110,16 @@ bdp gsearch <gid> "玄空飞星资料" --exact --json # 文件名精确匹配（
 
 `--json` 输出结构：
 
-**ls / search**（经 BaiduPCS-Go）：
+**ls**：
 ```json
-{ "keyword": "...", "path": "...", "raw": "表格文本" }
+{ "path": "/", "entries": [ { "index": 0, "name": "a.pdf", "path": "/a.pdf", "isDir": false, "size": 123, "sizeText": "123 B", "mtime": 1760000000, "mtimeText": "..." } ], "total": 1, "fileCount": 1, "dirCount": 0, "totalText": "1 个文件", "warning": null }
 ```
+
+**search**：
+```json
+{ "keyword": "报告", "engineKeyword": "报告", "path": "/", "mode": "substring", "total": 1842, "returned": 50, "page": 1, "pageSize": 50, "hasMore": true, "nextPage": 2, "entries": [ ... ], "warning": null }
+```
+> v1.7.0 起已是结构化 `entries[]`，**不再返回 `raw` 表格文本**。
 
 **head / tail**：
 ```json
@@ -137,8 +143,9 @@ bdp gsearch <gid> "玄空飞星资料" --exact --json # 文件名精确匹配（
 
 **gsearch**：
 ```json
-[ { "name": "N 倪海厦", "path": "/.../N 倪海厦", "isDir": true, "size": 0, "fsId": "292608024165826", "group": "539478953581833690" } ]
+{ "results": [ { "name": "N 倪海厦", "path": "/.../N 倪海厦", "isDir": true, "size": 0, "fsId": "292608024165826", "group": "539478953581833690" } ], "returned": 1, "page": 1, "pageSize": 50, "total": null, "hasMore": false, "nextPage": null, "complete": true, "partial": false, "timedOut": false, "stoppedReason": "complete", "scannedShares": 3, "totalShares": 3 }
 ```
+> 需要裸数组请显式加 `--legacy-json`。
 
 **peek**：
 ```json
@@ -148,9 +155,9 @@ bdp gsearch <gid> "玄空飞星资料" --exact --json # 文件名精确匹配（
 
 **grep**：
 ```json
-[ { "line": 12, "content": "匹配到的行内容" } ]
+{ "path": "/文档/日志.txt", "pattern": "ERROR", "matches": [ { "line": 12, "content": "匹配到的行内容" } ] }
 ```
-> 行号参数 `-n` 与 `-N` 等价（都显示行号）。
+> 行号参数只有 `-N` 有效（`-n` 是 head/tail 的行数选项，在 grep 中会报「不支持选项: --n」）。
 
 **cat**：
 ```json

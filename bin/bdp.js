@@ -74,7 +74,8 @@ function output(data, jsonFlag, formatter) {
 function emitJson(data, args) {
   const json = JSON.stringify(data, null, 2);
   if (args.flags.jsonFile) {
-    require("fs").writeFileSync(args.flags.jsonFile, json, "utf-8");
+    // 0600：JSON 里可能带 MCP 令牌，别让同机其他用户读到（POSIX 生效；Windows 需自行收紧 ACL）
+    require("fs").writeFileSync(args.flags.jsonFile, json, { encoding: "utf-8", mode: 0o600 });
     console.log(args.flags.jsonFile);
   } else {
     console.log(json);
@@ -170,7 +171,8 @@ function parseArgs(argv) {
     } else if (arg === "--max-nodes") {
       opts.flags.maxNodes = parseInt(argv[++i], 10) || 2000;
     } else if (arg === "--max-pages") {
-      opts.flags.maxPages = parseInt(argv[++i], 10) || 50;
+      // 0 = 未指定：gtree/gsearch 用 || 50 回落，preview 回落 preview.js 的 200（与 MCP 侧一致）
+      opts.flags.maxPages = parseInt(argv[++i], 10) || 0;
     } else if (arg === "--max-requests") {
       opts.flags.maxRequests = parseInt(argv[++i], 10) || 400;
     } else if (arg === "--no-cache") {
@@ -262,6 +264,12 @@ cmds.login = async (args, json) => {
   if (args.flags.bduss || args.flags.stoken) {
     if (!args.flags.bduss || !args.flags.stoken) {
       throw new Error("Manual login requires both --bduss and --stoken");
+    }
+    // 凭证含控制字符会污染后续 HTTP 头 / 引擎调用，先拒掉
+    for (const k of ["bduss", "stoken"]) {
+      if (config.hasControlChars(args.flags[k])) {
+        throw new Error("凭证不能包含控制字符（如换行、回车）: --" + k);
+      }
     }
     config.setAuth({
       bduss: args.flags.bduss,
@@ -412,7 +420,7 @@ cmds.organize = async (args, json) => {
   let applied = null;
   if (args.flags.apply) {
     if (!args.flags.yes) {
-      const msg = '整理是高危操作，需要显式确认：请加 --yes（或先 --dry-run 看计划）';
+      const msg = '整理是高危操作，需要显式确认：请加 --yes（不加 --apply 时只出计划，不会移动任何文件）';
       if (json || args.flags.jsonFile) {
         emitJson({ error: msg, requiresConfirmation: true, planned: result.plan.length }, args);
       } else {
@@ -499,7 +507,15 @@ cmds.config = async (args, json) => {
       else console.error("[ERROR] " + msg);
       return 1;
     }
-    const r = config.setConfig(key, value);
+    let r;
+    try {
+      r = config.setConfig(key, value);
+    } catch (e) {
+      const msg = e && e.message ? e.message : String(e);
+      if (json || args.flags.jsonFile) emitJson({ error: msg }, args);
+      else console.error("[ERROR] " + msg);
+      return 1;
+    }
     if (!r.ok) {
       if (json || args.flags.jsonFile) emitJson({ error: r.error }, args);
       else console.error("[ERROR] " + r.error);
@@ -520,6 +536,11 @@ cmds.config = async (args, json) => {
     return;
   }
 
+  const health = config.configHealth();
+  if (!health.ok) {
+    console.error("[WARN] 配置文件已损坏：" + health.error);
+    console.error("      请先手动备份并修复该文件；在此之前任何 --set 都会被拒绝（避免覆盖你的凭证）。");
+  }
   const cfg = config.get();
   const showSecrets = args.flags.showSecrets === true;
   const masked = { ...cfg };
@@ -577,7 +598,7 @@ function printEntries(entries) {
       "  " + String(e.index).padEnd(4) +
       String(e.sizeText || "-").padEnd(12) +
       String(e.mtimeText || "-").padEnd(21) +
-      e.path
+      sanitizeControl(e.path)
     );
   });
 }
@@ -670,14 +691,15 @@ cmds.cat = async (args, json) => {
   const filePath = args._[0];
   if (!filePath) { console.error("Usage: bdp cat <path>"); process.exit(1); }
   const text = pan.cat(filePath);
+  const safe = sanitizeControl(text);
   if (json) {
-    console.log(JSON.stringify({ path: filePath, content: text }));
+    console.log(JSON.stringify({ path: filePath, content: safe }));
   } else if (args.flags.number) {
-    text.split("\n").forEach((line, i) => {
+    safe.split("\n").forEach((line, i) => {
       console.log(`${String(i + 1).padStart(6)}  ${line}`);
     });
   } else {
-    process.stdout.write(text);
+    process.stdout.write(safe);
   }
 };
 
@@ -685,7 +707,7 @@ cmds.head = async (args, json) => {
   const filePath = args._[0];
   if (!filePath) { console.error("Usage: bdp head [-n N] <path>"); process.exit(1); }
   const n = args.flags.n || 20;
-  const lines = pan.head(filePath, n);
+  const lines = pan.head(filePath, n).map(sanitizeControl);
   if (json) {
     console.log(JSON.stringify({ path: filePath, lines: n, content: lines }));
   } else {
@@ -697,7 +719,7 @@ cmds.tail = async (args, json) => {
   const filePath = args._[0];
   if (!filePath) { console.error("Usage: bdp tail [-n N] <path>"); process.exit(1); }
   const n = args.flags.n || 20;
-  const lines = pan.tail(filePath, n);
+  const lines = pan.tail(filePath, n).map(sanitizeControl);
   if (json) {
     console.log(JSON.stringify({ path: filePath, lines: n, content: lines }));
   } else {
@@ -932,6 +954,27 @@ cmds.recycle = async (args, json) => {
     if (json || args.flags.jsonFile) emitJson({ restored: ids, ok: true }, args);
     else console.log(`✅ 已还原 ${ids.length} 项: ${ids.join(", ")}`);
   } else if (action === "clean") {
+    // 清空回收站不可恢复 → 与 bdp rm 同款闸门：非交互环境必须显式 --yes
+    if (!args.flags.yes) {
+      if (process.stdin.isTTY) {
+        const readline = require("readline");
+        const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+        const answer = await new Promise((resolve) => rl.question("确认清空整个回收站（不可恢复）? [y/N] ", resolve));
+        rl.close();
+        if (!/^y(es)?$/i.test(String(answer).trim())) {
+          console.error("[ERROR] 已取消清空回收站");
+          return 1;
+        }
+      } else {
+        const msg = "清空回收站不可恢复，需要显式确认：请加 --yes（先用 bdp recycle list 确认内容）";
+        if (json || args.flags.jsonFile) {
+          emitJson({ error: msg, requiresConfirmation: true }, args);
+        } else {
+          console.error("[ERROR] " + msg);
+        }
+        return 1;
+      }
+    }
     const r = pcsExtra.recycleClean();
     if (json || args.flags.jsonFile) emitJson({ cleaned: true }, args);
     else console.log("✅ 回收站已清空（不可恢复）");
@@ -963,7 +1006,8 @@ cmds.offline = async (args, json) => {
   if (action === "add") {
     const url = args._[1];
     if (!url) { console.error("Usage: bdp offline add <http_url> [--path /保存目录]"); process.exit(1); }
-    const r = pcsExtra.offlineAdd(url, args.flags.path);
+    // --path 在 parseArgs 里落到 flags.p（不是 flags.path），写错会静默丢掉保存目录
+    const r = pcsExtra.offlineAdd(url, args.flags.p || args.flags.path);
     output(r, json, () => console.log(`✅ 离线任务已创建: taskId=${r.taskId} (${url})${r.savePath ? ` → ${r.savePath}` : ""}`));
   } else if (action === "list") {
     const r = pcsExtra.offlineList();
@@ -1653,7 +1697,7 @@ const COMMANDS = {
     options: [
       "--lines <N>        文本预览显示行数 (默认40)",
       "--max-bytes <N>    文本读取字节上限",
-      "--max-pages <N>    PDF 最多解析页数",
+      "--max-pages <N>    PDF 最多解析页数 (默认200)",
     ],
     examples: [
       'bdp preview "/中医/某.pdf"',
@@ -1851,10 +1895,10 @@ const COMMANDS = {
     group: "pan",
     usage: "bdp recycle list | restore <fs_id>... | clean",
     desc: "回收站管理（列出/还原/清空）",
-    flags: ["page"],
-    note: "clean 清空不可恢复，使用前务必确认；BaiduPCS-Go 不二次确认",
-    options: ["--page <N> 回收站列表页码 (默认1)"],
-    examples: ["bdp recycle list", "bdp recycle restore 378804494923604", "bdp recycle clean"],
+    flags: ["page", "yes"],
+    note: "clean 清空不可恢复，非交互环境必须加 --yes；BaiduPCS-Go 不二次确认",
+    options: ["--page <N> 回收站列表页码 (默认1)", "--yes 清空回收站（不可恢复）时显式确认"],
+    examples: ["bdp recycle list", "bdp recycle restore 378804494923604", "bdp recycle clean --yes"],
   },
   share: {
     group: "pan",
@@ -2152,6 +2196,16 @@ cmds.serve = async (args, json) => {
     const tokenFile = args.flags.tokenFile;
     if (!token && tokenFile) {
       try { token = require("fs").readFileSync(tokenFile, "utf-8").trim(); } catch {}
+    }
+    // 用户自带令牌强度下限：1 个字符令牌 + 对外监听 = 事实上无认证
+    if (token && String(token).length < 16) {
+      console.error("[ERROR] --token 至少 16 个字符（或直接省略，由系统随机生成 48 位十六进制令牌）");
+      process.exit(1);
+    }
+    // 非回环监听告警：Windows 上 :: 是双栈，:: 与 0.0.0.0 一样会暴露到内网
+    const loopback = host === "127.0.0.1" || host === "localhost" || host === "::1";
+    if (!loopback) {
+      console.error("[WARN] 监听 " + host + "：该地址会暴露到本机之外（含内网），请确认已配置反向代理与 TLS。");
     }
     const srv = await startHttpServer({ port, host, token });
 

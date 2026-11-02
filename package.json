@@ -1,6 +1,6 @@
 {
   "name": "baiduwangpan-cli",
-  "version": "1.8.3",
+  "version": "1.8.4",
   "description": "百度网盘 CLI — 全盘读写 · 免下载读取文件内容 · 群聊文件浏览 (Agent 友好)",
   "main": "lib/index.js",
   "bin": {
@@ -12,7 +12,7 @@
     "postinstall": "node scripts/postinstall.js"
   },
   "engines": {
-    "node": ">=14"
+    "node": ">=22.5"
   },
   "dependencies": {
     "ws": "^8.18.0"

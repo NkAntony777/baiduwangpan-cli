@@ -2,7 +2,7 @@
 
 ## 前置条件
 
-1. 已安装 Node.js 14+
+1. 已安装 Node.js 22.5+（推荐 24；`bdp index` / `bdp ask` 依赖内置 `node:sqlite`）
 2. 已安装 `baiduwangpan-cli`（含自动下载的 BaiduPCS-Go 引擎）
 3. 有百度网盘账号
 4. 本机装有 Chrome 或 Edge 浏览器（用于自动登录，推荐）
@@ -72,7 +72,7 @@ bdp whoami
 }
 ```
 
-扫码登录时，PCS 文件操作直接使用 BDUSS/STOKEN；`gettemplatevariable` 和 mbox 等网页 API 在专用浏览器会话内执行。手动登录会将 `webTransport` 设为 `curl`，并清理扫码模式留下的完整 Cookie 配置。
+扫码登录时，PCS 文件操作直接使用 BDUSS/STOKEN；`gettemplatevariable` 和 mbox 等网页 API 在专用浏览器会话内执行。手动登录会将 `webTransport` 设为 `native`（真并发），并清理扫码模式留下的完整 Cookie 配置。
 
 ## 凭证安全
 

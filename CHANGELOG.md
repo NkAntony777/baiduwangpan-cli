@@ -4,6 +4,60 @@
 
 ---
 
+## v1.8.4 — 2026-11-02
+
+> 主题：**三路对抗性审核的修复** —— 安全（红队）、正确性、文档-实现对拍。
+
+### 🔴 安全
+
+- **提示注入防线此前是死代码**：`sanitizeUntrusted` 从未被调用，MCP 返回的正文裸奔。
+  现在所有 MCP 返回值都经 `sanitizeControl` 清洗，正文类字段额外包上
+  `<untrusted_file>…</untrusted_file>` 边界标记；CLI 的 `cat`/`head`/`tail`/`ls` 同样接入。
+- **边界标记可被伪造**：载荷里若含 `</untrusted_file>` 会提前闭合标记 → 注入内容落到标记区外。
+  现在写入前先中和载荷里的 `<untrusted_` / `</untrusted_`。
+- **控制字符覆盖不全**：只覆盖 C0/C1，RLO（`U+202E`）等 Unicode 格式字符全部存活 →
+  `invoice<U+202E>gnp.exe` 可把 `.exe` 伪装成 `.png`。现在补齐 Cf 类与行/段分隔符
+  （保留 ZWJ / VS16 以免破坏 emoji）。
+- **引擎退出码被忽略 → 删除类操作谎报成功**：`lib/pan.js` 的 `runPCS` 不看退出码，
+  引擎没真正执行也报「✅ 已删除」。现在按 BaiduPCS-Go 源码里的成功标记
+  （`操作成功, 以下文件/目录已删除` / `创建目录成功:`）判定，未确认即失败。
+- **`bdp config --set pcsPath` 是任意可执行文件启动链**：只校验非空 → 指向 `hostname.exe` 也能跑。
+  现在要求文件名以 `BaiduPCS-Go` 开头，且 `resolvePcsPath` 同样校验。
+- **`bdp_rename` 违反自身契约**：目标含 `/` 就原样透传，实际是「移动到任意路径」。现在只允许同目录改名。
+- **配置文件损坏会静默销毁凭证**：解析失败被吞成空配置，下一次 `--set` 就把 BDUSS/STOKEN 覆盖抹掉。
+  现在解析失败时拒绝写入并给出明确告警；写入改为**原子替换**（临时文件 + rename）。
+- **`--set` 白名单可被 `__proto__` / `toString` 绕过**：改用 `Object.hasOwn` 判定。
+- **其它收紧**：`ua` 拒绝控制字符；`maxBytes` 加 64MB 上限；`--token` 至少 16 字符；
+  HTTP 请求体上限改为**按字节**计（此前按 UTF-16 码元，中文可放大 3 倍），超限真正返回 413；
+  `/health` 不再回显版本号与工具数；非回环 `--host` 打印告警；`bdp recycle clean` 补上 `--yes` 闸门。
+
+### 🔴 正确性
+
+- **`bdp offline add --path <dir>` 的保存目录被静默丢弃**：值落在 `flags.p`，handler 读的是 `flags.path`。
+- **`bdp organize` 的报错提示让人去用不存在的 `--dry-run`**：现在改为「不加 `--apply` 时只出计划」。
+- **回收站列不出文件**：md5 列的正则只认纯 hex，而百度返回的是混淆 md5 → 文件行整行失配被丢弃，
+  「删除可恢复」的恢复路径对文件失效。现在放宽为 32 位 `[0-9a-zA-Z]`，并对 md5 反混淆。
+- **`bdp preview` 的 PDF 页数上限 CLI 是 50、MCP 是 200**：CLI 侧改为默认 200（与 MCP 一致）。
+
+### 📖 文档
+
+- `bdp grep -n` 会被判为「不支持选项」（`-n` 是 head/tail 的行数选项）→ 文档改为只用 `-N`。
+- `reference/examples.md` 里 `ls`/`search`/`grep`/`gsearch` 的 JSON 结构全是 v1.7.0 之前的旧格式 → 全部更正。
+- Node 版本要求 `>=14` → `>=22.5`（`bdp index` / `bdp ask` 依赖内置 `node:sqlite`）。
+- md5 验证样本数 15/15 → **9/9**（测试里实际只有 9 个样本，文档夸大了）。
+- `authentication.md` 说手动登录会把 `webTransport` 设为 `curl` —— 实际是 `native`。
+- `SKILL.md` 声称暴露 18 个工具却只列了 14 个 → 补全 4 个写工具。
+- 「native 让并发快 20×」的数字归属不准确 → 改为「v1.8.1 修 worker 池 + 切 native 后 dedup 19.4× / index 9.2×」。
+- README「通用选项」表补齐各命令的真实默认值。
+- CHANGELOG 清理 v1.8.2 的孤儿重复段。
+
+### 🧪 测试
+
+238 → **253 全绿**（新增 15 条：sanitize 净化与边界标记、config 白名单/值校验/损坏保护/原子写、
+MCP rename 边界与输出标记、HTTP 字节级体积上限、CLI 的 recycle clean 闸门与 offline --path 透传）
+
+---
+
 ## v1.8.3 — 2026-11-02
 
 > 主题：**让 Agent 能自主整理网盘** —— MCP 补齐写操作工具，并新增 HTTP 传输。
@@ -109,32 +163,6 @@ bdp organize /来自：iPhone --by type --target /归档/手机 --apply --yes
 
 ---
 
-
-
-> 主题：补上 `bdp config --set`（此前文档写了这条命令，但实现里并不存在）。
-
-### 🟢 新增：`bdp config --set <key> <value>`
-
-- 此前 `bdp config` 只能**查看**配置，文档却写着 `bdp config --set webTransport native` —— 
-  命令并不存在，属于文档与实现不符。现在补上实现，文档自动变正确。
-- **白名单**：`webTransport` / `maxBytes` / `ua` / `pcsPath`
-- **值校验**：`webTransport` 必须是 `curl`/`native`/`browser`；`maxBytes` 必须是 ≥1024 的整数
-- **凭证类字段（`bduss`/`stoken`/`cookie`/`browserProfile`/`browserPort`）拒绝 `--set`** ——
-  它们必须走 `bdp login`，以保证同时更新引擎登录态与配置
-- 未知键 / 非法值 / 缺值都报错并返回退出码 1，`--json` 模式带 `error` 字段
-- 成功时返回 `{ updated, value, previous, file }`
-
-```bash
-bdp config --set webTransport native
-bdp config --set maxBytes 2097152 --json
-```
-
-### 🧪 测试
-
-225 全绿（新增 config --set 的白名单与校验用例）
-
----
-
 ## v1.8.1 — 2026-11-02
 
 > 主题：**真正的并发** —— 修复 v1.8.0 里 `--concurrency` 形同虚设的问题。
@@ -198,7 +226,7 @@ bdp config --set maxBytes 2097152 --json
   （仓库已从 `qjf2016/BaiduPCS-Go` 迁移至 `qjfoidnh/BaiduPCS-Go`）。
   原理：第 10 位若是非十六进制字符则作密钥，`num ^ (15 & i)` 逐位还原，
   最后按 `[8:16]+[0:8]+[24:32]+[16:24]` 重排四段。
-- **已移植到 `lib/md5.js` 并用真实网盘数据验证 15/15 通过**
+- **已移植到 `lib/md5.js` 并用真实网盘数据验证 9/9 通过**
   （混淆值与真值双向、跨路径同一内容还原一致、非法输入不抛异常）。
 - **性能意义**：解密后可直接用 `/api/list` 一次返回的全目录 md5 做比对，
   **零额外请求**；相比逐文件调引擎 `meta` 快两个数量级。
