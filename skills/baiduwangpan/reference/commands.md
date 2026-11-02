@@ -561,7 +561,7 @@ bdp error --list --json     # 列出全部已知错误码
   "error": "文件或目录不存在",
   "errno": 31066,
   "errorCode": { "code": 31066, "name": "FILE_NOT_FOUND", "severity": "user-error", "retryable": false, "action": "…" },
-  "meta": { "command": "ls", "version": "1.9.2", "profile": null, "elapsedMs": 12 }
+  "meta": { "command": "ls", "version": "1.10.0", "profile": null, "elapsedMs": 12 }
 }
 ```
 
