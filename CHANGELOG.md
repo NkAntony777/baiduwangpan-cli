@@ -55,26 +55,52 @@
   ②全局选项的前置能力（含此前漏掉的 `--profile` / `--json-file`）；
   ③`bdp error` 的 code 取值规则（只接受 纯数字 / `errno=NNN` / `errno = -3`）。
 - **同步遗留清单补全**（README / SKILL.md / commands.md 三处一致）：
-  `quota`/`get`/`put`/`mkdir`/`rm`/`mv`/`cp`/`offline`/`share`/`recycle` 共 **10** 条
-  （原清单漏了 `offline`/`share`/`recycle`）。
+  `cat`/`head`/`tail`/`grep`/`peek`/`get`/`put`/`mkdir`/`rm`/`mv`/`cp`/`quota`/`offline`/`share`/`recycle`
+  共 **15** 条（+ `preview` 的回退说明）—— 原清单只写了 10 条，漏了 5 条读命令。
 - v1.10.0 性能摘要补齐 1/2/4 并发档、52 次定时器与**测量环境口径**；
   `commands.md` 补上此前缺失的 `gdownload` / `cache` 两节。
 
 ### 🧪 测试
 
-- 新增 `test/doc-contract.test.js`（7 条）—— **文档契约测试**（F22）：
-  自动断言「字段清单四处一致 / 运行时键集 == 文档字段表 / 数量口径 / 版本号 / zip 逐字节一致」。
+- 新增 `test/doc-contract.test.js`（12 条）—— **文档契约测试**（F22）：
+  自动断言「字段清单四处一致 / 运行时键集 == 文档字段表 / 数量口径 / 版本号 / zip 逐字节一致」，
+  以及本轮新写的**语义**（D5 布尔取值集合 / D6 退出码 / D8 code 取值规则 / D9 遗留清单 / D10 性能表互校）。
   **判据**：把 `commands.md` 里的 `codeText` 删掉 → 测试**必须失败**（已实测）。
 - 新增 `test/mcp-concurrency.test.js`（2 条）+ `test/mcp-concurrency-env.test.js`（1 条）：
   stdio 并发闸门（≤4）与 `BDP_MCP_MAX_CONCURRENCY` 生效。
-- 新增 `test/redact-paths.test.js`（3 条）：路径脱敏（CLI / MCP 两侧一致）。
+- 新增 `test/redact-paths.test.js`（11 条）：路径脱敏（CLI / MCP 两侧一致 + 全部路径形态）。
+- 新增 `test/cli-flag-guards.test.js`（6 条）：`--profile` / `--json-file` 的取值守卫与等号形式。
 - 扩展 `test/async-engine.test.js`（7 → 14 条）：输出超限、stderr 上限、超时 + kill，
   以及 MCP 层的 `isError` / `error.code === -32000` / `severity: retryable` 验收。
-- 测试总数 363 → **383**。
+- 测试总数 363 → **402**。
+
+### 🔍 四路审核（2026-11-02）→ 已全部修复
+
+v1.10.1 发布前按任务书 §5 派了四路审核（正确性/回归、信息泄漏与安全、文档对拍、边界穷举）。
+**三路 FAIL**（边界穷举在修复开始时仍在跑），共查出 **15 项**问题 —— 全部已修，并补了回归测试：
+
+| 级别 | 问题 | 修法 |
+|:--|:--|:--|
+| **P1** | `lib/pcs-extra.js` 与 `lib/preview.js` 的**同步**引擎调用**完全没有 timeout** —— 引擎挂死时 `spawnSync` 冻结**整个** Node 进程（不只是占一个闸门槽位），MCP 服务器整体不可用 | 新增 `lib/engine-timeout.js` 作**单一事实来源**（读 120s / 写 600s），三处引擎调用点全部带上 `timeout` + `killSignal`；写档按**引擎真实子命令**分档（`offlinedl` 而非死条目 `offline`，并补 `d`） |
+| **P1** | 「已知遗留（同步引擎路径）」清单**仍漏 6 条命令** —— 任务书与上轮审核都写错了（把 16 个「调用点」当成了 10 个「命令」）。`cat`/`head`/`tail`/`grep`/`peek` 也走同步引擎（`locate`/`meta`），`preview` 回退时也是 | 清单改为 **15** 条 + `preview` 回退说明，README / SKILL.md / commands.md 三处一致；契约测试新增「清单 == 实现」断言（命令→引擎子命令映射 + 调用点总数） |
+| **P1** | 路径脱敏可被多种常规写法绕过：正斜杠 Windows 路径、UNC、无扩展名路径（**用户名反而泄漏**）、长/非字母数字扩展名、POSIX 含空格路径 | `redactLocalPaths` 重写：覆盖上述全部形态；路径末尾按「末段扩展名 / 末段首个空格」回退 —— **不误吞正文**、**幂等** |
+| **P2** | CLI 错误通道只脱敏路径，**没做**控制字符剔除与伪标记中和 —— 与 MCP 口径不一致 | 新增共享的 `sanitizeErrorMessage()`（控制字符 + 标记中和 + 路径脱敏），CLI 与 MCP 走**同一个实现** |
+| **P2** | CLI 的内层 catch（login / config --set / offline / profile 切换）绕过脱敏；`whoami` 的 `pcsPath` / `configFile` 直接回显绝对路径 | 内层 catch 与这两个字段全部走脱敏 |
+| **P2** | `--profile -x`（单个连字符）仍会**建出并激活**垃圾 profile；`--profile " "`（纯空白）静默忽略 | 取值一律以 `-` 开头即拒绝；纯空白按空值拒绝 |
+| **P2** | 后置位 `--profile=x` 等号形式不被支持（前置位支持 → 前后不对称） | parseArgs 支持 `--flag=value` 形式（`--profile` / `--json-file`） |
+| **P2** | 前置位取值错误不走 JSON 通道（同一意图因参数顺序得到不同通道） | 两条路径统一按 `argv` 判定 `--json` |
+| **P2** | README / SKILL.md 没写 MCP 并发闸门（上限、env、口径） | 补：stdio 与 HTTP 上限都是 4、`BDP_MCP_MAX_CONCURRENCY` 可调、口径是**工具调用总数** |
+| **P2** | 契约测试对**本轮新写的语义零断言**（只守字段/数量/版本/zip 四类） | 契约测试 7 → 12 条，补 D5 布尔集合 / D6 退出码 / D8 code 规则 / D9 遗留清单 / D10 性能表互校 |
+| **P3** | 无 id 的 `tools/call` 通知仍会收到响应（违反 JSON-RPC） | 通知不再回包 |
+| **P3** | 超时提示始终指向 `BDP_ENGINE_TIMEOUT_MS`（写档实际用另一个变量） | 两个变量都写进提示 |
+| **P3** | 契约测试的 zip 体积断言写在 `if(zm)` 里 —— 措辞一改就静默失效 | 改成无条件断言 |
+
+> **契约测试的有效性判据已复测**：删掉 commands.md 里的 `codeText` 行 → **3 条断言同时失败**。
+> 该测试还抓出一处**两轮审核都漏掉**的漂移：`commands.md` 里第二份 `meta.version` 示例。
 
 ### 📦 分发
 
-- 重新构建 `baiduwangpan-skill.zip`（随 `skills/` 变更同步，37,514 字节 / 8 个文件）。
+- 重新构建 `baiduwangpan-skill.zip`（随 `skills/` 变更同步，38,250 字节 / 8 个文件）。
 
 > **本版本尚未发布到 npm**（npm latest 仍为 1.8.5）。
 > 需要 1.9.x/1.10.x 的功能请从 GitHub tag 安装：

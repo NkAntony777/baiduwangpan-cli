@@ -106,16 +106,117 @@ function parseErrorFieldTable(md) {
   return fields;
 }
 
-/** 统计仓库里的测试数（与 node --test 的计数口径一致：顶层 test(...) 声明） */
+/** 统计仓库里的测试数（与 node --test 的计数口径一致：顶层 test(...) 声明 + 子测试） */
 function countTests() {
   const dir = path.join(ROOT, "test");
   let n = 0;
   for (const f of fs.readdirSync(dir).filter((x) => x.endsWith(".test.js"))) {
     const s = fs.readFileSync(path.join(dir, f), "utf-8");
     n += (s.match(/^\s*test\(/gm) || []).length;
+    n += (s.match(/\bt\.test\(/g) || []).length;
   }
   return n;
 }
+
+/**
+ * 解析「并发数 | 改前 | 改后」这类性能表 → { 并发数: "改前 -> 改后" }
+ */
+function parsePerfTable(md) {
+  const lines = md.split("\n");
+  const out = {};
+  for (let i = 0; i < lines.length; i++) {
+    if (!/\|\s*并发数\s*\|/.test(lines[i])) continue;
+    for (let j = i + 2; j < lines.length; j++) {
+      // 允许行首缩进 —— CHANGELOG 的表格在列表里，是缩进的
+      const m = lines[j].match(/^\s*\|\s*(\d+)\s*\|\s*([^|]+?)\s*\|\s*([^|]+?)\s*\|/);
+      if (!m) break;
+      out[m[1]] = m[2].replace(/\*/g, "").trim() + " -> " + m[3].replace(/\*/g, "").trim();
+    }
+    break;
+  }
+  return out;
+}
+
+/** 文档里用反引号包起来的代码片段（避免在源码里直接写反引号） */
+function codeSpans(text) {
+  const BT = String.fromCharCode(96);
+  const parts = text.split(BT);
+  const out = [];
+  for (let i = 1; i < parts.length; i += 2) out.push(parts[i]);
+  return out;
+}
+
+/**
+ * 解析文档里的「已知遗留（同步引擎路径）」清单 → 命令名数组
+ */
+function parseSyncEngineList(md) {
+  // 三处的措辞不同（README/commands.md 用「已知遗留（同步引擎路径）」，
+  // SKILL.md 用「已知遗留：部分命令仍是同步引擎路径」）—— 所以按行扫描而不是按固定正则。
+  const lines = md.split("\n");
+  const start = lines.findIndex((l) => l.indexOf("同步引擎路径") >= 0);
+  assert.ok(start >= 0, "文档里应能找到「同步引擎路径」清单");
+  const spans = [];
+  for (let i = start; i < lines.length && i < start + 8; i++) {
+    for (const s of codeSpans(lines[i])) spans.push(s);
+    if (lines[i].indexOf("迁移列入 v1.11.0") >= 0) break;
+  }
+  const names = spans.filter(
+    (x) =>
+      /^[a-z]{2,12}$/.test(x) &&
+      x !== "ls" &&
+      x !== "search" &&
+      x !== "preview" &&
+      x !== "api" &&
+      x !== "web"
+  );
+  return Array.from(new Set(names)).sort();
+}
+
+/**
+ * 源码里走**同步**引擎的调用点总数（新增调用点必须同步改这里并复核清单）。
+ * 只数真实调用行：跳过注释行与函数定义。
+ */
+function countSyncEngineCallSites() {
+  const files = ["lib/pan.js", "lib/pcs-extra.js", "lib/preview.js"];
+  let n = 0;
+  for (const f of files) {
+    for (const line of read(path.join(ROOT, f)).split("\n")) {
+      const t = line.trim();
+      if (!t || t.startsWith("//") || t.startsWith("*") || t.startsWith("/*")) continue;
+      if (/^function runPCS(?:Result)?\(/.test(t)) continue; // 定义本身
+      if (/runPCS(?:Result)?\(/.test(t)) {
+        n++;
+        continue;
+      }
+      // 直接 spawn 引擎（绕过 runPCS 包装）的调用点 —— 目前只有 lib/preview.js 的 locate 回退。
+      // 包装函数内部的 spawnSync(cfg.pcsPath, args, …) 不单独计数（否则同一个调用点会被数两次）。
+      if (/spawnSync\(cfg\.pcsPath/.test(t) && !/spawnSync\(cfg\.pcsPath,\s*args/.test(t)) n++;
+    }
+  }
+  return n;
+}
+
+/**
+ * 「仍走同步引擎路径」的命令 → 它们用到的引擎子命令。
+ * 每个子命令都必须在源码里真实出现（防止文档与实现各说各话）。
+ */
+const SYNC_COMMAND_SUBCOMMANDS = {
+  cat: ["locate", "meta"],
+  head: ["locate"],
+  tail: ["locate", "meta"],
+  grep: ["locate"],
+  peek: ["locate", "meta"],
+  get: ["locate", "meta", "d"],
+  put: ["u"],
+  mkdir: ["mkdir"],
+  rm: ["rm"],
+  mv: ["mv"],
+  cp: ["cp"],
+  quota: ["quota"],
+  offline: ["offlinedl"],
+  share: ["share"],
+  recycle: ["recycle"],
+};
 
 /** 取 CHANGELOG 的最新版本段（第一个 ## 小节） */
 function latestChangelogSection() {
@@ -277,11 +378,117 @@ test("契约 5: baiduwangpan-skill.zip 与 skills/baiduwangpan/ 逐字节一致"
   // CHANGELOG 里写的 zip 体积应与实际一致
   // （D13 这类漂移正是从「文档写的数字与产物对不上」漏出来的）
   const zm = latestChangelogSection().match(/baiduwangpan-skill\.zip[^\n]*?([\d,]+)\s*字节/);
-  if (zm) {
-    assert.equal(
-      Number(zm[1].replace(/,/g, "")),
-      fs.statSync(ZIP_PATH).size,
-      "CHANGELOG 写的 zip 体积与实际不一致"
-    );
+  assert.ok(zm, "CHANGELOG 最新版本段应写明 baiduwangpan-skill.zip 的字节数");
+  assert.equal(
+    Number(zm[1].replace(/,/g, "")),
+    fs.statSync(ZIP_PATH).size,
+    "CHANGELOG 写的 zip 体积与实际不一致"
+  );
+});
+
+// ── 契约 6：D6 退出码语义 ────────────────────────────────────────────────
+test("契约 6: 退出码语义（只给开关不给命令 → 1；裸跑 bdp → 0）", () => {
+  const missing = runCli(["--json"]);
+  assert.equal(missing.code, 1, "只给全局开关不给命令应退出 1");
+  const parsed = JSON.parse(missing.stdout.replace(/^\uFEFF/, ""));
+  assert.ok(
+    parsed.error && parsed.error.indexOf("缺少命令") >= 0,
+    "应给出「缺少命令」: " + missing.stdout.slice(0, 200)
+  );
+  const bare = runCli([]);
+  assert.equal(bare.code, 0, "裸跑 bdp 应退出 0");
+  assert.ok(bare.stdout.length > 100, "裸跑应打印帮助");
+});
+
+// ── 契约 7：D5 布尔取值集合 == lib/flags.js ───────────────────────────────
+test("契约 7: 文档的布尔取值集合 == lib/flags.js 的 TRUE_SET/FALSE_SET", () => {
+  const flags = require("../lib/flags");
+  const md = read(COMMANDS_MD);
+  const m = md.match(/是布尔参数：接受 ([^。]*)。/);
+  assert.ok(m, "commands.md 应写明布尔参数的取值集合");
+  const docVals = codeSpans(m[1]).map((x) => x.replace(/^"|"$/g, ""));
+  const expected = new Set(
+    Array.from(flags.TRUE_SET).concat(Array.from(flags.FALSE_SET))
+  );
+  assert.deepEqual(
+    new Set(docVals),
+    expected,
+    "文档写的布尔取值集合应与 lib/flags.js 完全一致（不多不少）"
+  );
+});
+
+// ── 契约 8：D8 bdp error 的 code 取值规则 ────────────────────────────────
+test("契约 8: bdp error 的 code 取值规则（三种写法命中 + 非登记判定）", () => {
+  const cases = [
+    ["31066", 31066],
+    ["errno=31066", 31066],
+    ["errno = -3", -3],
+  ];
+  for (const [input, expectedCode] of cases) {
+    const j = runCliJson(["error", input, "--json"]);
+    assert.equal(j.code, expectedCode, input + " 应命中错误码 " + expectedCode);
+    assert.equal(typeof j.code, "number", "code 恒为数值");
   }
+  const unknown = runCliJson(["error", "abc31066", "--json"]);
+  assert.equal(unknown.code, null, "abc31066 应判为未登记（code 为 null）");
+  assert.equal(unknown.codeText, "abc31066", "未登记码应原样回显 codeText");
+});
+
+// ── 契约 9：D9 同步遗留清单（三处一致 + 与实现对得上）────────────────────
+test("契约 9: 同步遗留清单三处一致，且与实现对得上", () => {
+  const expected = Object.keys(SYNC_COMMAND_SUBCOMMANDS).sort();
+  assert.deepEqual(
+    parseSyncEngineList(read(README_MD)),
+    expected,
+    "README 的同步遗留清单应与实现一致"
+  );
+  assert.deepEqual(
+    parseSyncEngineList(read(SKILL_MD)),
+    expected,
+    "SKILL.md 的同步遗留清单应与实现一致"
+  );
+  assert.deepEqual(
+    parseSyncEngineList(read(COMMANDS_MD)),
+    expected,
+    "commands.md 的同步遗留清单应与实现一致"
+  );
+
+  // 每条命令用到的引擎子命令必须在源码里真实存在（防止文档与实现各说各话）
+  const src = ["lib/pan.js", "lib/pcs-extra.js", "lib/preview.js"]
+    .map((f) => read(path.join(ROOT, f)))
+    .join("\n");
+  for (const [cmd, subs] of Object.entries(SYNC_COMMAND_SUBCOMMANDS)) {
+    for (const sub of subs) {
+      assert.ok(
+        src.indexOf('"' + sub + '"') >= 0,
+        cmd + " 用到的引擎子命令 " + sub + " 在源码里找不到 —— 清单与实现对不上"
+      );
+    }
+  }
+  // 同步调用点总数（新增调用点必须同步改这个数，并复核清单）
+  assert.equal(
+    countSyncEngineCallSites(),
+    18,
+    "同步引擎调用点数量变了 —— 清单需要复核"
+  );
+});
+
+// ── 契约 10：D10 README 与 CHANGELOG 的性能表互校 ───────────────────────
+test("契约 10: README 与 CHANGELOG 的并发性能表逐格一致", () => {
+  const readme = parsePerfTable(read(README_MD));
+  const chg = parsePerfTable(read(CHANGELOG_MD));
+  assert.ok(
+    Object.keys(readme).length >= 4,
+    "README 应有 1/2/4/8 四档并发表，实际 " + Object.keys(readme).length
+  );
+  assert.deepEqual(readme, chg, "README 与 CHANGELOG 的并发性能表必须逐格一致");
+
+  const timers = (md) => {
+    const m = md.match(/定时器[^\n]*?(\d+)\s*次/);
+    return m ? Number(m[1]) : null;
+  };
+  const rt = timers(read(README_MD));
+  const ct = timers(read(CHANGELOG_MD));
+  assert.ok(rt !== null && ct !== null, "两处都应写明定时器触发次数");
+  assert.equal(rt, ct, "README 与 CHANGELOG 的定时器触发次数应一致");
 });

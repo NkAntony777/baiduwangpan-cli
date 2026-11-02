@@ -88,7 +88,7 @@ function assertSafeOfflineUrl(url) {
 // markUntrusted（lib/sanitize.js）：CLI 的 JSON 通道把「来自网盘的正文」包上
 // <untrusted_file>…</untrusted_file> 边界标记，与 MCP 侧（lib/mcp.js 的 sanitizeToolResult）行为一致 ——
 // Agent 读到的正文一律是**数据**，不是可以执行的指令（防间接提示注入）。
-const { sanitizeControl, markUntrusted, redactLocalPaths } = require("../lib/sanitize");
+const { sanitizeControl, markUntrusted, redactLocalPaths, sanitizeErrorMessage } = require("../lib/sanitize");
 
 // ── Utils ──────────────────────────────────────────────
 
@@ -146,9 +146,14 @@ function verboseLog(args, msg) {
 function flagValueError(flag, val, hint) {
   const suffix = hint ? "（" + hint + "）" : "";
   if (val === undefined) return flag + " 需要一个取值" + suffix;
-  if (val === "") return flag + " 的取值不能为空" + suffix;
-  if (typeof val === "string" && val.startsWith("--")) {
-    return flag + " 的取值不能以 -- 开头（收到 \"" + val + "\"）" + suffix;
+  const s = val === null ? "" : String(val);
+  // 纯空白按「空值」处理 —— 否则 `--profile " "` 会静默切换到「无 profile」而不报错
+  if (s.trim() === "") return flag + " 的取值不能为空" + suffix;
+  // 取值不能以 "-" 开头 —— 不只是 "--"：
+  //   `bdp error -3 --profile --json` 会把 "--json" 建成垃圾 profile 并激活它；
+  //   `bdp error -3 --profile -x` 会把 "-x" 建成垃圾 profile 并激活它（**同一类副作用**）。
+  if (s.startsWith("-")) {
+    return flag + " 的取值不能以 - 开头（收到 \"" + s + "\"）" + suffix;
   }
   return null;
 }
@@ -174,13 +179,14 @@ function parseArgs(argv) {
       opts.flags.json = true;
     } else if (arg === "--legacy-json") {
       opts.flags.legacyJson = true;
-    } else if (arg === "--json-file") {
+    } else if (arg === "--json-file" || arg.startsWith("--json-file=")) {
       // 取值不能是另一个 flag（否则会把 "--json" 当成输出文件名，真的建出垃圾文件）
-      const fileVal = argv[i + 1];
+      const isEq = arg.startsWith("--json-file=");
+      const fileVal = isEq ? arg.slice("--json-file=".length) : argv[i + 1];
       const fileErr = flagValueError("--json-file", fileVal, "用 bdp --json-file <路径> 指定输出文件");
       if (fileErr) throw new FlagValueError(fileErr);
       opts.flags.jsonFile = fileVal;
-      i++;
+      if (!isEq) i++;
     } else if (arg === "--no-meta") {
       opts.flags.noMeta = true;
     } else if (arg === "--version" || arg === "-v") {
@@ -320,13 +326,16 @@ function parseArgs(argv) {
       opts.flags.setValue = argv[++i];
     } else if (arg === "--show-secrets") {
       opts.flags.showSecrets = true;
-    } else if (arg === "--profile") {
+    } else if (arg === "--profile" || arg.startsWith("--profile=")) {
       // 取值不能是另一个 flag（否则会把 "--json" 建成一个垃圾 profile 并激活它）
-      const profVal = argv[i + 1];
+      // 后置位此前**不支持** `--profile=x` 形式（落进通用分支被 validateFlags 拦下）——
+      // 前置位支持、后置位不支持 = 前后不对称，这里补齐。
+      const isEq = arg.startsWith("--profile=");
+      const profVal = isEq ? arg.slice("--profile=".length) : argv[i + 1];
       const profErr = flagValueError("--profile", profVal, "用 bdp profile list 查看已有的 profile");
       if (profErr) throw new FlagValueError(profErr);
       opts.flags.profile = profVal;
-      i++;
+      if (!isEq) i++;
     } else if (arg === "--from-uk") {
       opts.flags.fromUk = argv[++i];
     } else if (arg === "--msg-id") {
@@ -423,9 +432,9 @@ cmds.login = async (args, json) => {
     }
   } catch (e) {
     if (json) {
-      console.log(JSON.stringify(withMeta({ error: e.message }, jsonCtx), null, 2));
+      console.log(JSON.stringify(withMeta({ error: sanitizeErrorMessage(e.message) }, jsonCtx), null, 2));
     } else {
-      console.error(`[ERROR] ${e.message}`);
+      console.error(`[ERROR] ${sanitizeErrorMessage(e.message)}`);
       console.error("        提示: 也可手动方式 bdp login --bduss <值> --stoken <值>");
     }
     process.exit(1);
@@ -440,8 +449,9 @@ cmds.whoami = async (args, json) => {
       bduss: cfg.bduss ? "***set***" : "missing",
       stoken: cfg.stoken ? "***set***" : "missing",
       webTransport: cfg.webTransport,
-      pcsPath: cfg.pcsPath,
-      configFile: config.CONFIG_FILE,
+      // pcsPath / configFile 都是**本地绝对路径**（含 Windows 用户名）—— 脱敏后再输出
+      pcsPath: redactLocalPaths(cfg.pcsPath || ""),
+      configFile: redactLocalPaths(config.CONFIG_FILE || ""),
       profile: config.getProfile() || "default(全局)",
     },
     json,
@@ -626,14 +636,16 @@ cmds.config = async (args, json) => {
     try {
       r = config.setConfig(key, value);
     } catch (e) {
-      const msg = e && e.message ? e.message : String(e);
+      // 配置文件损坏等错误里带**配置文件的绝对路径** —— 必须脱敏
+      const msg = sanitizeErrorMessage(e && e.message ? e.message : String(e));
       if (json || args.flags.jsonFile) emitJson({ error: msg }, args);
       else console.error("[ERROR] " + msg);
       return 1;
     }
     if (!r.ok) {
-      if (json || args.flags.jsonFile) emitJson({ error: r.error }, args);
-      else console.error("[ERROR] " + r.error);
+      const rmsg = sanitizeErrorMessage(r.error);
+      if (json || args.flags.jsonFile) emitJson({ error: rmsg }, args);
+      else console.error("[ERROR] " + rmsg);
       return 1;
     }
     const payload = {
@@ -1133,8 +1145,9 @@ cmds.offline = async (args, json) => {
     try {
       safeUrl = assertSafeOfflineUrl(url);
     } catch (e) {
-      if (json || args.flags.jsonFile) emitJson({ error: e.message }, args);
-      else console.error("[ERROR] " + e.message);
+      const umsg = sanitizeErrorMessage(e.message);
+      if (json || args.flags.jsonFile) emitJson({ error: umsg }, args);
+      else console.error("[ERROR] " + umsg);
       return 1;
     }
     // 离线下载 = 让百度服务器去取任意 URL 并落进网盘，必须显式确认
@@ -2433,7 +2446,10 @@ async function main() {
       // 校验与**后置**解析共用 flagValueError —— 只修一半会重演同样的 bug。
       const profErr = flagValueError("--profile", val, "用 bdp profile list 查看已有的 profile");
       if (profErr) {
-        if (preCommandFlags.includes("--json")) {
+        // 通道判定统一用 argv —— 此前只看 preCommandFlags，
+        // 导致 `bdp --profile --json error -3`（--json 在取值位）走文本通道，
+        // 而 `bdp error -3 --profile --json` 走 JSON 通道 —— 同一意图两种通道。
+        if (argv.includes("--json")) {
           console.log(JSON.stringify(withMeta({ error: profErr }, jsonCtx), null, 2));
         } else {
           console.error("[ERROR] " + profErr);
@@ -2450,7 +2466,7 @@ async function main() {
       const fileVal = rest[1];
       const fileErr = flagValueError("--json-file", fileVal, "用 bdp --json-file <路径> 指定输出文件");
       if (fileErr) {
-        if (preCommandFlags.includes("--json")) {
+        if (argv.includes("--json")) {
           console.log(JSON.stringify(withMeta({ error: fileErr }, jsonCtx), null, 2));
         } else {
           console.error("[ERROR] " + fileErr);
@@ -2495,7 +2511,7 @@ async function main() {
     try {
       config.useProfile(profile);
     } catch (e) {
-      console.error("[ERROR] " + e.message);
+      console.error("[ERROR] " + sanitizeErrorMessage(e.message));
       process.exit(1);
     }
   }
@@ -2552,16 +2568,16 @@ async function main() {
       const info = hasErrno ? errorCodes.describeError(e.errno, { verbose: !!args.flags.verbose }) : null;
       emitJson(
         Object.assign(
-          { error: redactLocalPaths(e && e.message ? e.message : String(e)) },
+          { error: sanitizeErrorMessage(e && e.message ? e.message : String(e)) },
           hasErrno ? { errno: e.errno } : {},
           info ? { errorCode: info } : {}
         ),
         args
       );
     } else {
-      // CLI 侧同样要脱敏本地绝对路径（与 MCP 侧共用 redactLocalPaths —— v1.10.1 / T-05）：
-      // 引擎缺失时 stderr 会打印完整绝对路径（含 Windows 用户名）。
-      console.error("[ERROR] " + redactLocalPaths(e.message));
+      // 与 MCP 侧共用 sanitizeErrorMessage（控制字符剔除 + 标记中和 + 路径脱敏）——
+      // 此前 CLI 侧只脱敏路径、**没做**控制字符剔除与标记中和，两侧口径不一致。
+      console.error("[ERROR] " + sanitizeErrorMessage(e.message));
     }
     exitCode = 1;
   } finally {

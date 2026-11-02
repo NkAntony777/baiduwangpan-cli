@@ -382,9 +382,15 @@ bdp error --list [--json]       列出全部已知错误码
 > **只给开关不给命令 → 退出码 1**：`bdp --json`（给了全局选项但没给命令）会报「缺少命令」并**退出码 1**，
 > `--json` 下返回 JSON 错误体。裸跑 `bdp`（一个参数都不给）仍打印帮助并**退出码 0**。
 >
-> **已知遗留（同步引擎路径）**：`quota` / `get` / `put` / `mkdir` / `rm` / `mv` / `cp` / `offline` /
-> `share` / `recycle` 这 10 条命令的引擎路径**仍是同步的**（`ls` / `search` 已改异步）。
+> **已知遗留（同步引擎路径）**：`cat` / `head` / `tail` / `grep` / `peek` / `get` / `put` / `mkdir` /
+> `rm` / `mv` / `cp` / `quota` / `offline` / `share` / `recycle` 这 **15** 条命令的引擎路径**仍是同步的**
+> （`ls` / `search` 已改异步）；`preview` 在 web API 失败时也会回退同步引擎。
 > 它们要么低频、要么是写操作（本就不该并发），迁移列入 v1.11.0。
+> —— 但**所有**引擎调用点（`lib/pan.js` / `lib/pcs-extra.js` / `lib/preview.js`）现已**全部带 timeout + killSignal**：
+> 引擎挂死不再冻结整个进程，只会让那一次调用在时限内明确失败。
+
+> **MCP 并发闸门**：stdio 与 HTTP 两种传输的并发工具调用**上限都是 4**（`BDP_MCP_MAX_CONCURRENCY` 可调）。
+> 口径是**工具调用总数**（不是引擎进程数）—— 走 web API 的工具（quota/dedup/organize/ask）同样占一个槽位。
 
 ### get 下载可靠性（v1.2.0）
 

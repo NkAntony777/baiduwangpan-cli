@@ -259,7 +259,10 @@ test("CLI: --profile 后面跟选项名时报错，且不建出垃圾 profile", 
       });
     const r = run(["--profile", "--json", "error", "-3"]);
     assert.equal(r.status, 1, "应报错退出");
-    assert.ok((r.stderr || "").indexOf("--profile") >= 0, "错误消息应提到 --profile");
+    // 通道已统一：argv 里出现 --json 就走 JSON 通道（stdout），
+    // 不再因参数顺序不同而「前置位走文本、后置位走 JSON」。
+    const out = (r.stdout || "") + (r.stderr || "");
+    assert.ok(out.indexOf("--profile") >= 0, "错误消息应提到 --profile: " + out.slice(0, 200));
     const cfgFile = path.join(localCfg, "config.json");
     if (fs.existsSync(cfgFile)) {
       const cfg = JSON.parse(fs.readFileSync(cfgFile, "utf-8"));

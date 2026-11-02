@@ -256,9 +256,17 @@ bdp --json        # → 报「缺少命令」，退出码 1（--json 下返回 J
 bdp               # → 打印帮助，退出码 0（裸跑惯例）
 ```
 
-**已知遗留（同步引擎路径）**：`quota` / `get` / `put` / `mkdir` / `rm` / `mv` / `cp` / `offline` /
-`share` / `recycle` 这 10 条命令的引擎路径**仍是同步的**（`ls` / `search` 已改异步）。
+**已知遗留（同步引擎路径）**：`cat` / `head` / `tail` / `grep` / `peek` / `get` / `put` / `mkdir` /
+`rm` / `mv` / `cp` / `quota` / `offline` / `share` / `recycle` 这 **15** 条命令的引擎路径**仍是同步的**
+（`ls` / `search` 已改异步）；`preview` 在 web API 失败时也会回退同步引擎。
 它们要么低频、要么是写操作（本就不该并发），迁移列入 v1.11.0。
+
+> 所有引擎调用点（`lib/pan.js` / `lib/pcs-extra.js` / `lib/preview.js`）现已**全部带 timeout + killSignal** ——
+> 引擎挂死不会冻结整个进程，只会让那一次调用在时限内明确失败（`severity: retryable`）。
+> 时限：读操作 120s、写操作 600s，可用 `BDP_ENGINE_TIMEOUT_MS` / `BDP_ENGINE_TIMEOUT_SLOW_MS` 覆盖。
+
+**MCP 并发闸门**：stdio 与 HTTP 两种传输的并发**工具调用**上限都是 **4**（`BDP_MCP_MAX_CONCURRENCY` 可调）。
+口径是**工具调用总数**、不是引擎进程数 —— 走 web API 的工具（quota/dedup/organize/ask）同样占一个槽位。
 
 ### serve — MCP 服务器（stdio / HTTP）
 
@@ -578,7 +586,7 @@ bdp error --list --json     # 列出全部已知错误码
 >   —— 不会从任意字符串里抽数字去猜（那会给出错误的确切错误码）。
 > - `list` / `verbose` 是布尔参数：接受 `true` / `false` / `1` / `0` / `"true"` / `"false"` / `"1"` / `"0"`
 >   / `yes` / `no` / `on` / `off` / `""`（空字符串）。**大小写不敏感，且忽略首尾空白**
->   （如 `" TRUE "` 视为 `true`；`""` 视为 `false`）。
+>   （如 `" TRUE "` 视为 `true`；`""` 视为 `false`）。**未给（null/undefined）视为 false**，不报错。
 >   MCP 侧收到无法识别的值会报 `-32001`（**不静默降级** —— 静默降级会让 Agent 以为参数生效了）。
 > - `list` 与 `code` 同时给时**以 `list` 为准**（`code` 被忽略）。
 > 工具执行失败时，MCP 返回 `{ "error": { code, name, message, severity, retryable, action }, "meta": {...} }`，
@@ -725,7 +733,7 @@ bdp cache [clear]
 ```
 
 - 查看 / 清空群聊会话缓存（`~/.bdp/cache/`）
-- 目录缓存 TTL 30 分钟、分享库缓存 5 分钟；`--no-cache` 可绕过
+- 目录缓存 TTL 30 分钟、分享库缓存 5 分钟；`gsearch`/`gtree`/`gshares`/`gls` 的 `--no-cache` 可绕过（`bdp cache` 自身无此选项）
 - `clear` 清空整个缓存目录
 
 ```bash
