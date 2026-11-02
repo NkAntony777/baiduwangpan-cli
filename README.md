@@ -24,6 +24,8 @@
 - **👥 群聊文件浏览 + 下载** — 逆向 mbox API，列出群组、浏览群内分享库、搜索群文件，并支持**直接下载群文件到本地**（免转存）
 - **🤖 Agent 友好** — 所有命令支持 `--json` 结构化输出，零解析成本
 - **🔌 MCP 接入** — `bdp serve --mcp` 可作为 MCP 服务器运行（stdio 或 HTTP），工具描述与参数 schema 由客户端自动发现；18 个工具含移动/重命名/删除，Agent 可自主整理
+- **🗂️ 内容整理** — `bdp organize` 按类型/年份/来源生成归类方案，默认只出计划不动文件
+- **🌐 MCP over HTTP** — `bdp serve --mcp --http` 支持独立进程/远程 agent 接入（默认仅本机 + 令牌认证）
 - **📚 结构化目录/搜索** — `ls` / `search` 的 `--json` 返回真正的结构化 `entries[]`，不再需要解析文本表格
 - **🔤 编码自动识别** — UTF-8 / GBK / Big5 自动判别，中文古籍不再乱码，grep 不再静默漏检
 - **🚦 可信的退出码** — 命令失败一定以非零退出码结束，Agent 不会把失败当成功
@@ -48,6 +50,8 @@
 | **查重复文件** | `bdp dedup /med` | 自动反混淆 md5，报告可释放空间 |
 | **建立全文索引** | `bdp index build /中医` | 本地 SQLite FTS5，增量更新 |
 | **检索内容** | `bdp ask "甘草配伍"` | 基于索引搜正文，不只搜文件名 |
+| **内容整理** | `bdp organize /med --by type` | 按类型/年份/来源归类（默认只出计划） |
+| **设置配置项** | `bdp config --set webTransport native` | 白名单校验，凭证类字段需用 `bdp login` |
 | 下载 | `bdp get /文档/file.zip` | 保存到本地，**size 校验 + 断点续传** |
 | 上传 | `bdp put ./file.txt /文档/` | 全盘任意位置 |
 | 移动/重命名 | `bdp mv <src> <dst>` | 移动或重命名 |
@@ -139,6 +143,24 @@ bdp gls 539478953581833690 742474845517885
 bdp gdownload 539478953581833690 954615608563687 -o ./downloads
 ```
 
+## 🆕 v1.8.x 新增（内容深度能力）
+
+| 能力 | 命令 | 说明 |
+|:-----|:-----|:-----|
+| **md5 反混淆** | 自动 | 百度返回的 md5 是混淆值 —— 同一内容在不同路径返回值不同。不解密就无法去重。算法移植自 BaiduPCS-Go 源码，用真实网盘数据验证 15/15 |
+| **重复文件清理** | `bdp dedup /med` | 先 size 粗筛再 md5 精算，报告可释放空间；删除走回收站可恢复 |
+| **全类型预览** | `bdp preview /报告.pdf` | PDF 文本层（中文 CID 字体可还原）/ ZIP 中央目录 / DOCX / XLSX / EPUB / 图片尺寸 |
+| **本地全文索引** | `bdp index build /中医` | SQLite FTS5 + 中文二元分词，增量更新 |
+| **内容检索** | `bdp ask 甘草配伍` | 搜正文而非仅文件名 |
+| **内容整理** | `bdp organize /med --by type` | 按类型/年份/来源归类；同名目标自动加序号去重 |
+| **配置项写入** | `bdp config --set webTransport native` | 白名单 + 值校验；凭证类字段仍走 `bdp login` |
+| **Agent 写操作** | MCP `bdp_move`/`bdp_rename`/`bdp_remove` | Agent 能自主整理；remove 需显式 confirm，rename 默认 dry-run |
+| **MCP over HTTP** | `bdp serve --mcp --http` | 独立进程/远程 agent 接入；默认仅绑 127.0.0.1 + Bearer 令牌 |
+
+> **v1.8.1 起并发真正生效**：`--concurrency` 此前形同虚设（worker 池退出条件错误 + `spawnSync` 阻塞事件循环），
+> 实测 dedup 扫描提速 **19.4×**、index 全量构建提速 **9.2×**（结果完全一致）。
+
+
 ## 🆕 v1.7.0 新增
 
 | 改进 | 说明 |
@@ -172,6 +194,14 @@ bdp head [-n N] <path>           读取前 N 行 (默认 20)
 bdp tail [-n N] <path>           读取后 N 行 (默认 20)
 bdp grep <pattern> <path>        搜索文件内容
 bdp peek <path>                  预览文件信息 + 前 10 行 (含 md5/ctime)
+bdp preview <path>              多类型预览 (PDF文本/ZIP目录/DOCX/XLSX/EPUB/图片尺寸)
+bdp dedup [path]                查重复文件 (自动反混淆md5) [--top N] [--depth N]
+bdp dedup <path> --remove-duplicates --yes   删除重复副本 (走回收站, 可恢复)
+bdp organize [path] --by type|year|source   内容整理归类 (默认只出计划)
+                              [--target /归档] [--layout type-year] [--apply --yes]
+bdp index build [path]          建立本地全文索引 [--include a,b] [--no-extract]
+bdp index status                查看索引状态 (索引在 ~/.bdp/index/)
+bdp ask <查询>                  检索网盘正文 [--limit N] [-p dir] [--ext ext]
 bdp get <path> [-o dir]          下载文件 (直链分块, size 校验, 断点续传)
                                   [--resume] [--force] [--progress] [--no-verify-size] [--dry-run]
                                   <gid>:<fs_id> 形式自动走群文件直下
@@ -189,6 +219,10 @@ bdp share set <path> [--pwd P]   创建分享链接 [--combined 输出带密码�
 bdp share cancel <id>...         取消分享
 bdp share list                   列出分享 (受 BaiduPCS-Go v4.0.1 引擎 bug 限制)
 bdp profile list / use <name>    多账号 profile 管理
+bdp serve --mcp                 启动 MCP 服务器 (stdio) -- 18 个带 schema 的工具
+bdp serve --mcp --http [--port N] [--host H] [--token T]  MCP over HTTP
+                              (默认仅绑 127.0.0.1 + Bearer 令牌; /health 免令牌)
+bdp config --set <key> <value>  设置配置项 (白名单: webTransport/maxBytes/ua/pcsPath)
 bdp help [command]               帮助总览 / 单命令详情 (--json 结构化输出)
 ```
 
