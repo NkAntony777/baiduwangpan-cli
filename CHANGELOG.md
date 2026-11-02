@@ -4,6 +4,45 @@
 
 -----
 
+## v1.11.2 — 2026-11-02
+
+> 主题：**MCP 参数校验统一到 -32001** —— 四路审核的 P2-4 发现。
+> 其中一条是**会真的写数据**的：`bdp_mkdir {path: 123}` 会在网盘根目录建出一个名为 `123` 的目录。
+
+### 🔧 修复
+
+- **参数错误被误报成服务端错误（-32000 → -32001）**：此前 `bdp_remove` 缺 `confirm`、
+  `bdp_organize` 缺归类维度、`bdp_gsearch` 缺 gid/keyword 都抛普通 `Error` →
+  MCP 侧映射成 `-32000 / severity=unknown / retryable=false`，Agent 会以为「百度侧出问题了」，
+  甚至去提 Issue。现在统一打 `toolArgumentError` → **`-32001 / user-error / 不重试`**。
+- **`bdp_mkdir {path: 123}` 会真的建出名为 `123` 的目录**：数字被 `String()` 之后直接拼进引擎参数。
+  现在路径参数做**类型校验**（必须是字符串）+ 长度上限（4096）+ 控制字符拒绝 —— 引擎根本不会被调用。
+- **`bdp_gsearch` 缺参时先打网络请求**：报的是「无法获取 bdstoken: Web 会话未认证」。
+  现在先校验 `gid`/`keyword`，参数错就直接 `-32001`，不发任何请求。
+- **`bdp_remove` 的 `confirm` 必须是布尔 `true`**：字符串 `"true"` 也拒绝
+  （布尔与字符串混用会让这道确认闸门形同虚设）。
+- **`bdp_read {lines:"abc"}` 静默回落 20**：现在 `lines` 必须是整数且在 `1–10000`，
+  否则 `-32001`（此前调用方以为参数生效了）。
+- **超长路径报「引擎找不到」**：`path` 40000 字符会真的 spawn 并返回 `ENAMETOOLONG`，
+  被映射成「未找到 BaiduPCS-Go 可执行文件」。现在长度上限 4096，直接 `-32001`。
+- 校验覆盖面：`bdp_ls` / `bdp_read` / `bdp_preview` / `bdp_peek` / `bdp_get` / `bdp_put` /
+  `bdp_move` / `bdp_copy` / `bdp_remove` / `bdp_mkdir` / `bdp_organize` / `bdp_gsearch`。
+  `bdp_put` 的 `local` 是**本地**路径，只做字符串/长度校验，不套网盘路径规则。
+
+### 🧪 测试
+
+- 新增 `test/mcp-args.test.js`（4 条 / 15 个非法参数用例）：
+  参数错误矩阵、`bdp_mkdir {path:123}` **不得触发引擎**、端到端 `error.code === -32001`、
+  合法参数（含空格路径）不被误伤。
+- 测试总数 410 → **414**。
+
+### 📦 分发
+
+- 重新构建 `baiduwangpan-skill.zip`（38,346 字节 / 8 个文件）。
+- **npm 上仍为 1.10.2**：`v1.11.0` / `v1.11.1` 是未发布的开发 tag，首次发布将是本版。
+
+---
+
 ## v1.11.1 — 2026-11-02
 
 > 主题：**四路审核的修正版** —— v1.11.0 的两条对外声明被审核**实测证伪**，本版修正实现与措辞。

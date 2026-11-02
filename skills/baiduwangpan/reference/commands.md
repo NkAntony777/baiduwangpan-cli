@@ -203,6 +203,7 @@ bdp organize [path] --by type --apply --yes   # 执行（真实移动网盘文�
 | `--by source` | 来源目录（把 `/来自：iPhone` 这类目录收拢） |
 
 > **默认只出计划**。执行需 `--apply --yes`（与 `bdp dedup` / `bdp rm` 一致的确认契约）。
+> 有文件没移动成功时退出码为 1。`--json` 看 `applied.failed`，不一定有顶层 `error`。
 > 同名目标会自动加序号（`report.pdf` → `report (2).pdf`）避免移动冲突。
 > `--layout` 决定层级顺序，取值：`type-year` / `year-type` / `type-source` / `source-type` /
 > `year-source` / `source-year`。**非法值会报错退出**（不会静默兜底）。
@@ -218,7 +219,7 @@ bdp organize [path] --by type --apply --yes   # 执行（真实移动网盘文�
 v1.9.0 起，每条命令的 `--json` 输出都会**追加**一个 `meta` 字段（只追加，不改任何既有字段）：
 
 ```json
-"meta": { "command": "ls", "version": "1.11.1", "profile": null, "elapsedMs": 42 }
+"meta": { "command": "ls", "version": "1.11.2", "profile": null, "elapsedMs": 42 }
 ```
 
 | 字段 | 含义 |
@@ -245,7 +246,7 @@ bdp --json --profile x error -3      # 两者交错也可以
 bdp ls --json --profile x            # 也可以都在命令后
 ```
 
-> 带值选项的取值**不能以 `--` 开头** —— `bdp error -3 --profile --json` 会**报错退出 1**
+> 带值选项的取值**不能以 `-` 开头**（`-x` 和 `--json` 都不行）—— `bdp error -3 --profile --json` 会**报错退出 1**
 > （此前会把 "--json" 建成一个垃圾 profile 并激活它）；
 > `bdp --json-file --json error -3` 同理不会建出名为 `--json` 的文件。
 
@@ -257,18 +258,23 @@ bdp               # → 打印帮助，退出码 0（裸跑惯例）
 ```
 
 **同步引擎路径：已清零**（v1.11.0，v1.11.1 复核）—— 此前 15 条命令走同步引擎（`spawnSync` 冻结
-整个事件循环，引擎挂死 = MCP 服务器整体不可用）。现已**全部**改为异步 spawn，写操作不再阻塞事件循环。
+整个事件循环，引擎挂死 = MCP 服务器整体不可用）。现已全部改为异步 spawn，写操作不再冻住事件循环。
 
-> **仍存在的同步子进程**（都不是引擎调用）：`webTransport=curl` 的传输模式、群文件下载的 curl 通道、
-> 预览取大小的 HEAD 探测兜底。默认的 `native` 传输下，常规读路径（cat / head / tail / grep）
-> 已改为异步 fetch，不再同步 fork curl。
+> **仍存在的同步子进程**（都不是 BaiduPCS-Go）：`webTransport=curl` 时，Web API 与 Range 读取仍同步 fork curl。
+> 下面两条**不看**传输模式是不是 native：
+> - 群文件下载（`gdownload`，以及 `get` 的 `gid:fs_id`）始终同步 curl。单文件最长约 3600s，多文件打包最长约 7200s，这段时间事件循环冻住。
+> - 预览取文件大小时，异步 HEAD 失败会再同步跑 `curl -I`（默认 native 下也会走到）。
+>
+> 默认 native 下，cat / head / tail / grep / peek 的正文读取已是异步 fetch。
 
-> 所有引擎调用点（`lib/pan.js` / `lib/pcs-extra.js` / `lib/preview.js`）都带 timeout + killSignal ——
-> 引擎挂死不会冻结整个进程，只会让那一次调用在时限内明确失败（`severity: retryable`）。
-> 时限：读操作 120s、写操作 600s，可用 `BDP_ENGINE_TIMEOUT_MS` / `BDP_ENGINE_TIMEOUT_SLOW_MS` 覆盖。
+> 引擎调用都走 `lib/pan.js` 的异步 runner（`lib/pcs-extra.js`、`lib/preview.js` 的 locate、登录同步凭证都复用它）。
+> 到点会杀掉该子进程，只有这一次调用失败（`severity: retryable`）。
+> 时限：读操作 120s（`BDP_ENGINE_TIMEOUT_MS`）、写操作 600s（`BDP_ENGINE_TIMEOUT_SLOW_MS`）。
+> 登录同步凭证单独限 30s，不走这两档。超时文案里只出现**当前这一档**对应的变量名。
 
-**MCP 并发闸门**：stdio 与 HTTP 两种传输的并发**工具调用**上限都是 **4**（`BDP_MCP_MAX_CONCURRENCY` 可调）。
-口径是**工具调用总数**、不是引擎进程数 —— 走 web API 的工具（quota/dedup/organize/ask）同样占一个槽位。
+**MCP 并发闸门**：stdio 与 HTTP 的并发**工具调用**默认上限 **4**（`BDP_MCP_MAX_CONCURRENCY`）。
+没设置或不是数字 → 4；设成 0 或负数 → 1。
+口径是**工具调用总数**，不是引擎进程数：dedup / organize / ask 不调引擎，quota 走 BaiduPCS-Go，四者都各占一个槽位。
 
 ### serve — MCP 服务器（stdio / HTTP）
 
@@ -601,7 +607,7 @@ bdp error --list --json     # 列出全部已知错误码
   "error": "文件或目录不存在",
   "errno": 31066,
   "errorCode": { "code": 31066, "name": "FILE_NOT_FOUND", "severity": "user-error", "retryable": false, "action": "…" },
-  "meta": { "command": "ls", "version": "1.11.1", "profile": null, "elapsedMs": 12 }
+  "meta": { "command": "ls", "version": "1.11.2", "profile": null, "elapsedMs": 12 }
 }
 ```
 

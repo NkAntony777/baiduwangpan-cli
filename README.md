@@ -377,22 +377,25 @@ bdp error --list [--json]       列出全部已知错误码
 
 > **全局选项位置自由**：`--json` / `--verbose` / `--no-meta` / `--legacy-json` / `--profile <name>` /
 > `--json-file <path>` 都可以放在**命令之前**，也可以放在命令之后，布尔开关与带值选项**可任意交错**
-> （如 `bdp --json --profile x error -3`）。带值选项的取值**不能以 `--` 开头** —— 否则报错退出 1。
+> （如 `bdp --json --profile x error -3`）。带值选项的取值**不能以 `-` 开头**（`-x` 和 `--json` 都不行）—— 否则报错退出 1。
 >
 > **只给开关不给命令 → 退出码 1**：`bdp --json`（给了全局选项但没给命令）会报「缺少命令」并**退出码 1**，
 > `--json` 下返回 JSON 错误体。裸跑 `bdp`（一个参数都不给）仍打印帮助并**退出码 0**。
 >
 > **同步引擎路径：已清零**（v1.11.0，v1.11.1 经四路审核复核）—— 此前 15 条命令走同步引擎
-> （`spawnSync` 冻结整个事件循环，引擎挂死 = MCP 服务器整体不可用）。现已**全部**改为异步 spawn：
-> 写操作不再阻塞事件循环，并发调用真正能并行。所有引擎调用点都带 timeout + killSignal ——
-> 挂死只会让那一次调用在时限内明确失败。
->
-> **仍存在的同步子进程**（都不是引擎调用）：`webTransport=curl` 的传输模式（HTTP 层）、
-> 群文件下载的 curl 通道、以及预览取大小时的 HEAD 探测兜底。默认的 `native` 传输走 fetch，
-> 常规读路径（cat / head / tail / grep）已不再同步 fork curl。
+> （`spawnSync` 冻结整个事件循环，引擎挂死 = MCP 服务器整体不可用）。现已全部改为异步 spawn，
+> 写操作不再冻住事件循环。读操作默认 120s、写操作 600s；登录时同步引擎凭证单独限 30s。
+> 到点会杀掉该子进程，只有这一次调用失败。
 
-> **MCP 并发闸门**：stdio 与 HTTP 两种传输的并发工具调用**上限都是 4**（`BDP_MCP_MAX_CONCURRENCY` 可调）。
-> 口径是**工具调用总数**（不是引擎进程数）—— 走 web API 的工具（quota/dedup/organize/ask）同样占一个槽位。
+> **仍存在的同步子进程**（都不是 BaiduPCS-Go，而且下面两条**不看**是不是 native 传输）：
+> 群文件下载（`gdownload`，以及 `get` 的 `gid:fs_id`）始终同步 fork curl，单文件最长约 3600s、多文件打包最长约 7200s，这段时间事件循环是冻住的。
+> 预览要文件大小时，异步 HEAD 失败会再同步跑一次 `curl -I`，默认 native 下也会走到。
+> `webTransport=curl` 时，Web API 和 Range 读取仍是同步 curl。
+> 默认 native 下，cat / head / tail / grep / peek 的正文读取已经是异步 fetch。
+
+> **MCP 并发闸门**：stdio 与 HTTP 的并发工具调用默认上限 **4**（`BDP_MCP_MAX_CONCURRENCY`）。
+> 没设置或不是数字 → 4；设成 0 或负数 → 1。
+> 口径是**工具调用总数**，不是引擎进程数：dedup / organize / ask 不调引擎，quota 走 BaiduPCS-Go，四者都各占一个槽位。
 
 ### get 下载可靠性（v1.2.0）
 
