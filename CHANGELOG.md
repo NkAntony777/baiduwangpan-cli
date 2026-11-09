@@ -4,6 +4,12 @@
 
 -----
 
+## Unreleased
+
+- 修复 Linux 扫码登录无法发现只提供 `microsoft-edge-stable` 的 Edge 安装；同时识别 beta/dev 通道的命令名。
+- 浏览器检测回归测试使用隔离的 PATH，不依赖本机浏览器或手动软链接。测试总数 444 → **445**。
+- Skill 内容未变化；`baiduwangpan-skill.zip` 仍为 40,873 字节。
+
 ## v1.11.3 — 2026-11-02
 
 > 主题：**把剩下的同步 curl 和缺的命令补上**。群文件下载、curl 传输、预览 HEAD 不再冻住事件循环。MCP 补齐群工具。CLI 补上 `rename` 与 `doctor`。
