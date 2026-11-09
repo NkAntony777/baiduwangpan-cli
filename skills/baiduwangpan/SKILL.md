@@ -108,6 +108,10 @@ bdp du [path]                      # 目录容量分析
 bdp offline add <http_url>         # 离线下载
 bdp recycle list                   # 回收站
 bdp share set|cancel|list          # 分享管理
+bdp shared list                   # 个人版“共享给我的文件夹”（不是团队空间）
+bdp shared create <own-dir> --yes  # 将已有普通文件夹设为共享，生成邀请链接
+bdp shared put <local> <dir> --yes # 共享目录上传（首版单文件 <=32MiB）
+bdp shared get <file> [-o dir]     # 共享文件下载，-o 指定本地目录
 ```
 
 ### 内容深度工具（v1.8.0 起）

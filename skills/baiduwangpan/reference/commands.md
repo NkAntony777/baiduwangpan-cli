@@ -664,6 +664,33 @@ bdp offline list
 - ⚠️ **创建离线任务需要 `--yes`**（非交互环境），且**拒绝**非 http(s) 与内网/本机地址
   （如 `169.254.169.254`、`127.0.0.1`、`192.168.*`、`file://`）——否则百度服务器会变成 SSRF 跳板
 
+### shared — 个人版共享文件夹（CLI）
+
+对应普通文件夹右键“共享”及“共享给我的文件夹”，使用 `/sharedir` API，不创建团队空间。
+
+```bash
+bdp mkdir /协作资料
+bdp shared create /协作资料 --yes --json
+bdp shared members /协作资料 --json
+bdp shared invite /协作资料 --yes --json
+bdp shared list --page 1 --json
+bdp shared ls '/<share>123-456' --page 1 --json
+bdp shared put ./note.txt '/<share>123-456' --yes --json
+bdp shared get '/<share>123-456/note.txt' -o ./downloads --json
+bdp shared remove /协作资料 789 --yes --json
+bdp shared cancel /协作资料 --yes --json
+```
+
+- 创建共享前，普通目录需要已存在。不会自动覆盖或取消子目录已有的共享。
+- 拥有者用真实路径（例如 `/协作资料`），接收者必须用自己的 `shared list` 返回的原始 `/<share>拥有者UK-目录FID` 路径。工具不会把接收路径回退到个人网盘。
+- 邀请链接由用户交给参与者，接受邀请后加入；首版不发送 IM 消息，不提供未证实的只读/编辑角色参数。
+- 设置共享、生成邀请链接、移除成员、取消共享和上传需 `--yes` 或交互确认；库函数要求布尔 `confirm: true`。
+- 上述写操作和下载支持 `--dry-run`：只展示计划，不调用接口、不创建本地文件。
+- 首版上传/下载仅支持单个文件，上限 32MiB；上传按 4MiB 分块校验 MD5，下载逐块校验字节数。不覆盖远端或本地同名文件，不递归下载目录。
+- 移除成员固定 `delete_files=0`，不删除其已上传内容；不支持自动更改共享成员的角色。
+- `list`、`members`、`ls` 支持 `--page`（默认 1）；接收列表和目录每页 100 条，成员每页 50 条，返回后续分页提示。
+- 所有命令沿用 JSON 信封。首版没有新增 MCP 工具。
+
 ### share — 分享管理
 
 ```

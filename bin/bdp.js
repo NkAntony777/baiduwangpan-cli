@@ -20,6 +20,7 @@
  *   bdp quota                      网盘配额
  *   bdp offline add <url> / list   离线下载
  *   bdp share set/cancel/list      分享管理
+ *   bdp shared <action>           个人版共享文件夹（右键“共享”）
  *   bdp profile list/use/unset     多账号 profile 切换
  *
  * 群聊文件操作:
@@ -1238,6 +1239,31 @@ cmds.offline = async (args, json) => {
   }
 };
 
+cmds.shared = async (args, json) => {
+  const shared = require("../lib/shared-folder");
+  const [action, ...values] = args._;
+  const counts = { list: 0, ls: 1, create: 1, members: 1, invite: 1, remove: 2, cancel: 1, put: 2, get: 1 };
+  if (!Object.prototype.hasOwnProperty.call(counts, action) || values.length !== counts[action]) {
+    throw new Error("用 bdp help shared 查看个人版共享文件夹命令及参数");
+  }
+  const writes = new Set(["create", "invite", "remove", "cancel", "put"]);
+  const options = { dryRun: args.flags.dryRun === true, confirm: true };
+  if (writes.has(action) && !options.dryRun && !(await requireYes(args, json, "共享文件夹" + action, "会改变共享成员、可访问性或文件内容"))) return 1;
+  let result;
+  switch (action) {
+    case "list": result = await shared.list({ start: ((args.flags.page || 1) - 1) * 100 }); break;
+    case "ls": result = await shared.ls(values[0], { page: args.flags.page }); break;
+    case "members": result = await shared.members(values[0], { start: ((args.flags.page || 1) - 1) * 50 }); break;
+    case "create": result = await shared.create(values[0], options); break;
+    case "invite": result = await shared.invite(values[0], options); break;
+    case "remove": result = await shared.removeMember(values[0], values[1], options); break;
+    case "cancel": result = await shared.cancel(values[0], options); break;
+    case "put": result = await shared.put(values[0], values[1], options); break;
+    case "get": result = await shared.get(values[0], args.flags.o, options); break;
+  }
+  output(result, json, () => console.log(sanitizeControl(JSON.stringify(result, null, 2))));
+};
+
 cmds.share = async (args, json) => {
   const action = args._[0] || "list";
   if (action === "set") {
@@ -2146,6 +2172,15 @@ const COMMANDS = {
     note: "clean 清空不可恢复，非交互环境必须加 --yes；BaiduPCS-Go 不二次确认",
     options: ["--page <N> 回收站列表页码 (默认1)", "--yes 清空回收站（不可恢复）时显式确认"],
     examples: ["bdp recycle list", "bdp recycle restore 378804494923604", "bdp recycle clean --yes"],
+  },
+  shared: {
+    group: "pan",
+    usage: "bdp shared list | ls <shared-path> | create <own-dir> | members <own-dir> | invite <own-dir> | remove <own-dir> <uk> | cancel <own-dir> | put <local> <shared-dir> | get <shared-file>",
+    desc: "个人版文件夹右键「共享」：设置共享、成员与邀请链接、共享目录上传下载",
+    flags: ["yes", "dryRun", "page", "o"],
+    options: ["--yes 确认设置共享、生成邀请链接、移除成员或上传", "--dry-run 写操作和下载只展示计划，不请求接口", "--page <N> list/ls/members 的页码（默认 1）", "-o <dir> shared get 保存目录"],
+    note: "使用个人版 /sharedir 接口，不是团队空间或普通分享链接。先用 mkdir 创建自己的目录，再 shared create；成员通过邀请链接加入。拥有者使用自己的真实共享路径，接收者使用 list 返回的 /<share>拥有者UK-目录FID 路径。首版单文件上限 32MiB，不覆盖同名文件；移除成员不删除其文件。",
+    examples: ["bdp shared list --json", "bdp shared create /协作资料 --yes --json", "bdp shared invite /协作资料 --yes --json", "bdp shared put ./note.txt '/<share>123-456' --yes", "bdp shared get '/<share>123-456/note.txt' -o ./downloads"],
   },
   share: {
     group: "pan",

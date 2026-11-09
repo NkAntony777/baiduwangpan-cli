@@ -1,101 +1,64 @@
-# RFC：多人协作文件夹与受授权共享目录上传
+# 个人版共享文件夹：实现及接口记录
 
-状态：Draft / 接口发现阶段。关联 [Issue #3](https://github.com/NkAntony777/baiduwangpan-cli/issues/3)。
+关联 [Issue #3](https://github.com/NkAntony777/baiduwangpan-cli/issues/3)。本 Draft 已包含 `lib/shared-folder.js`、`bdp shared` 及隔离测试，不再只是接口设计。
 
-本文提出能力边界和实现步骤，**不是已实现的功能说明**。当前不新增可执行的创建、邀请或共享目录上传命令；下文命令和数据结构均为待讨论的接口草案。
+## 产品范围
 
-## 需求
+实现普通文件夹右键菜单的 **“共享”**，以及 **“共享给我的文件夹”**。它使用个人版 `/sharedir` 接口。
 
-账号 A 创建一个可协作的目录，向账号 B 授予读写权限。B 在自己的登录态下，向 A 的该目录上传文件；双方能看到相同的目录内容。只读成员不能写入，撤销成员授权后不能继续写入。
+`/ostp/sharedspace` 团队空间、普通 `pan.baidu.com/s/...` 分享链接、群消息文件是不同产品，本实现不混用它们的接口。
 
-这与以下现有行为不同：
+成员通过邀请链接加入共享目录，拥有者可以查看成员和移除成员。本轮发现的个人版界面没有独立只读/编辑角色设置，因此没有虚构角色参数。生成邀请链接不等于对方已经加入，CLI 不主动向好友发送消息。
 
-- `mkdir + share set`：创建自己的普通目录，再生成访问链接；不授予目录协作写权限。
-- `put`：调用 BaiduPCS-Go `u`，目标路径属于引擎当前账号，不能用他人的目录路径代表跨账号写入。
-- 群分享消息：可以浏览、搜索和下载消息中的文件；“向群里发送自己的新文件分享”与“修改他人的既有目录”是不同能力。
-- `transfer`：把分享内容保存到自己的网盘，不对原共享目录执行写入。
+## 当前前端证据（2026-11-09）
 
-## 现有证据及其边界
+- [个人版主页面 home.bf6b3fad.js](https://nd-static.bdstatic.com/m-static/v20-main/home/js/home.bf6b3fad.js)：右键“共享”对应 `enjoyTogether-plugin`；`/enjoytogether` 是接收目录入口。
+- [共享设置组件 chunk-300cc7c4.af10f74a.js](https://nd-static.bdstatic.com/m-static/v20-main/home/js/chunk-300cc7c4.af10f74a.js)：模块 `8c84` 定义创建、邀请、成员和取消共享 API，调用点给出字段。
+- [上传 SDK chunk-vendors.3b5ab759.js](https://nd-static.bdstatic.com/m-static/v20-main/home/js/chunk-vendors.3b5ab759.js)：普通网盘预创建、分块上传、提交，以及虚拟共享路径的处理。
 
-| 能力 | 代码或资料 | 当前可推出的结论 |
+这些是当前前端实现证据，非承诺稳定的官方开放 API；后续前端版本可能调整。
+
+## 接口
+
+通用查询参数：`channel=chunlei`、`clienttype=0`、`web=1`、`app_id=250528`、当前登录态的 `bdstoken`。POST 使用表单编码，认证复用已有 `http.webJson` / 浏览器会话。
+
+| 操作 | 方法及路径 | 关键参数 |
 | --- | --- | --- |
-| 普通目录创建、个人上传 | `lib/pan.js` 的 `mkdir` / `upload` | 仅证实个人网盘路径操作 |
-| 普通链接分享管理 | `lib/pcs-extra.js` 的 `shareSet` | 没有成员邀请或共享目录写权限参数 |
-| 群列表和分享浏览 | `lib/group.js` 的 `listGroups` / `listShares` / `listFiles` | 可复用已有的读取逻辑；ID 需保留为字符串 |
-| 群文件下载 | `lib/group.js` 的 `getShareDlink`，`product=mbox` | 依赖登录态、消息及群上下文；不能据此推导上传接口 |
-| 群文件转存 | [历史逆向笔记](../group-transfer-reverse-engineering.md)、[下载结论](../group-download-final-verdict.md) | 仓库记录了 2026-08 的拒绝结果，不能当作新协作写入的实现依据；也不代表所有协作功能均不可用 |
-| 官方 MCP 上传和分享能力 | [baidu-netdisk/mcp](https://github.com/baidu-netdisk/mcp) 的 `file_upload_stdio` / `file_sharelink_set` | 证实个人网盘上传和分享，未提供本文所需的成员授权与跨账号目录写入契约 |
+| 获取目录身份 | GET `/api/filemetas` | `target=[完整路径]` |
+| 设置共享 | POST `/sharedir/create` | `fid`、`invite_link=1`、`overlay=0` |
+| 接收的共享目录 | GET `/sharedir/list` | `method=receive`、`start`、`limit=100` |
+| 查看共享内容 | GET `/api/list` | `dir` 保留完整共享路径，`page`、`num=100` |
+| 成员列表 | POST `/sharedir/member/list` | `uk`、`fid`、`start`、`limit=50` |
+| 获取邀请链接 | POST `/sharedir/invite/link` | `uk`、`fid` |
+| 移除成员 | GET `/sharedir/member/del` | `fid`、`delete_uk`、`delete_files=0` |
+| 取消共享 | POST `/sharedir/cancel` | `fid` |
+| 上传预创建 | POST `/api/precreate` | `path`、`target_path`、`autoinit=1`、`block_list` |
+| 上传分块 | POST 百度 PCS `/rest/2.0/pcs/superfile2` | `path`、`uploadid`、`uploadsign`、`partseq`，表单文件字段 `file` |
+| 提交文件 | POST `/api/create?isdir=0` | `path`、`target_path`、`size`、`uploadid`、`block_list`、`ondup=newcopy` |
+| 获取下载直链 | GET `/api/filemetas` | `target=[完整路径]`、`dlink=1` |
 
-尚缺少经验证的：协作目录创建接口、成员邀请/撤销接口、权限查询接口、跨账号目录上传接口，以及相应响应和错误码。本文不猜测这些接口的路径或请求参数。
+创建共享遇到 `18201`（目录下已有子共享）时返回错误，不自动使用 `overlay=1` 取消子共享。
 
-## 产品及后端范围
+## 路径和权限
 
-先由维护者确认首个后端：个人版协作目录、个人版群共享，或企业版团队空间。每种后端分别声明能力；不能通过账号类型或 URL 猜测它们可以互换。
+- 接收方路径的根形式是 `/<share>拥有者UK-根目录FID`，两个部分都保留字符串。
+- 拥有者必须使用自己的真实路径。真实验收中，拥有者用自己的接收方虚拟路径读取目录得到 `errno=141`。
+- 普通真实路径必须先用成员接口证明其属于已共享目录；接收方虚拟路径原样发送，不改写到个人根目录。
+- 子目录处理保持共享身份，拒绝 `..`、控制字符和模糊 ID。服务端权限错误直接上报。
+- 移除成员保留文件，不能通过 `remove` 删除自己；取消整份共享使用独立的 `cancel`。
 
-建议的能力集合：`listSpaces`、`listEntries`、`download`、`createFolder`、`listMembers`、`inviteMember`、`revokeMember`、`upload`。某个能力只有在相应接口及权限校验被验证后才开放。没有协作写接口时，不回退为向自己的网盘上传再分享。
+## 首版边界
 
-## 目标寻址草案
+- CLI：`shared create/list/ls/members/invite/remove/cancel/put/get`。普通目录由已有 `bdp mkdir` 创建。
+- 共享状态、成员操作及上传都需显式确认；dry-run 不联网，下载 dry-run 也不落盘。
+- 上传/下载只支持单文件且最大 32MiB，这是当前实现的内存边界，不是百度产品额度声明。4MiB 分块，失败或 MD5 不符不提交文件；下载字节数不符不保存文件。
+- 不默认覆盖同名远端或本地文件；没有目录递归、断点续传、自动接受邀请、IM 邀请或 MCP 工具。
 
-个人路径 `/文档/资料` 不足以表示共享目录。共享目标必须绑定其所属空间和目录标识；后端所需字段以真实接口为准。可讨论的描述方式：
+## 验证状态
 
-```json
-{
-  "backend": "personal-collaboration",
-  "spaceId": "opaque-string-id",
-  "directoryId": "opaque-string-id",
-  "ownerUk": "opaque-string-id"
-}
-```
+- 隔离测试覆盖请求字段、共享路径身份、确认与 dry-run、成员移除保留文件、失败传播、分块校验和本地覆盖保护。
+- 实际 CLI 已使用登录会话读到接收的共享目录，并能读取其内容列表。
+- 专用自有临时目录已完成：普通目录创建 → 设置共享 → 成员列表 → 邀请链接 → 上传文本 → 下载并逐字节比对 → 取消共享 → 删除测试目录。
+- 不把自有共享目录的上传验收记作跨账号上传。接收方上传和移除实际成员仍需独立验证；在此之前 PR 保持 Draft。
 
-- 所有远端 ID 保留字符串，避免超过 JavaScript 安全整数范围后错选对象。
-- 路径若作为输入，必须相对于已明确选定的共享空间解析，不能落入当前账号的个人根目录。
-- 不使用本地缓存的“可写”标记代替服务端鉴权；撤销权限后必须识别服务端拒绝。
-- 不通过普通公开分享链接推断邀请、上传或删除权限。
-
-## CLI / MCP 草案
-
-以下为讨论语法，当前不可执行：
-
-```text
-bdp collab list
-bdp collab create <name> --dry-run
-bdp collab create <name> --yes
-bdp collab members <space-id>
-bdp collab invite <space-id> <member-id> --role editor --yes
-bdp collab revoke <space-id> <member-id> --yes
-bdp collab ls <space-id> <directory-id>
-bdp collab put <local> <space-id> <directory-id> --dry-run
-bdp collab put <local> <space-id> <directory-id> --yes
-bdp collab get <space-id> <file-id> -o <local-dir>
-```
-
-MCP 再根据已实现的能力注册工具，不先发布只会报未实现的工具 schema。写操作的库入口要求布尔 `confirm: true`；CLI 使用现有确认交互与 `--yes`。CLI 与 MCP 共享同一套参数、权限及错误处理逻辑。
-
-dry-run 只说明将执行的动作、目标空间和成员，不创建目录、邀请成员或上传文件。若未查询服务端权限，输出明确标记为未核验，不承诺写入一定成功。
-
-## 实现步骤
-
-1. **取得现行接口证据**：在可用于测试的账号中分别观察创建、邀请、撤销、只读访问、上传的正常前端请求，保存去除凭证的请求结构与最小响应。确认是否确为同一目录协作，而非群消息快照。
-2. **独立后端模块**：在 `lib/` 中实现已经确认的接口，复用现有异步 HTTP 传输和超时策略。上传若分阶段，记录创建、分块、提交各阶段的失败和重试边界。
-3. **隔离测试**：使用来自真实请求结构的脱敏 fixture，覆盖鉴权、目标身份、成员权限、错误响应、超时和中断；不依赖开发者的个人网盘配置。
-4. **CLI 入口**：只注册已可用的命令，提供 JSON 信封和结构化目标标识；同步命令帮助、README、Skill 文档及 ZIP。
-5. **双账号验收**：完成下面的条件后，才把 PR 标记为可供合并；MCP 入口可按维护者意见同批或后续接入。
-
-## 双账号验收条件
-
-- A 创建协作目录，响应可再次读取到稳定的空间/目录标识。
-- B 加入后能在自己的登录态下读取同一目录。
-- A 授予 B 写权限，B 上传小文件；A 能读取到该文件，内容与本地一致。
-- 只读成员的上传被服务端拒绝，CLI 非零退出，JSON 不出现成功标记。
-- A 撤销 B 后，B 的后续写入失败；旧缓存不能继续授权。
-- 同名文件不被默认覆盖；目录不存在、文件过大、权限不足均有可区分的错误。
-- dry-run、参数错误和未确认操作不产生目录、邀请、上传或个人网盘的回退文件。
-- 会话续接、超时及失败输出不泄漏 Cookie、BDUSS、STOKEN、OAuth token 或调试会话地址。
-
-## 需要维护者确认
-
-- 本项目优先覆盖哪一种协作后端？是否已有可复用的请求记录或实现分支？
-- 是否先交付创建/成员权限，再另一个 PR 交付上传下载？
-- CLI 命令组、目标 ID 表达和默认同名策略是否合适？
-
-当前阻塞是缺少已验证的写入接口及双账号验收证据，不能用现有个人上传或群下载接口替代。取得这些证据后，可按上述步骤在本 Draft 上继续实现。
+真实账号的 Cookie、BDUSS、STOKEN、邀请链接和个人目录身份不存入仓库或测试 fixture。
