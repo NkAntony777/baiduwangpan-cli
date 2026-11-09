@@ -20,6 +20,7 @@
  *   bdp quota                      网盘配额
  *   bdp offline add <url> / list   离线下载
  *   bdp share set/cancel/list      分享管理
+ *   bdp transfer <url> --pwd CODE  转存分享文件/目录
  *   bdp profile list/use/unset     多账号 profile 切换
  *
  * 群聊文件操作:
@@ -288,7 +289,11 @@ function parseArgs(argv) {
     } else if (arg === "--glob") {
       opts.flags.glob = true;
     } else if (arg === "--pwd" || arg === "--password") {
-      opts.flags.pwd = argv[++i];
+      const value = argv[i + 1];
+      const error = flagValueError(arg, value, "请在选项后提供提取码");
+      if (error) throw new FlagValueError(error);
+      opts.flags.pwd = value;
+      i++;
     } else if (arg === "--combined") {
       opts.flags.combined = true;
     } else if (arg === "--dry-run") {
@@ -1238,6 +1243,21 @@ cmds.offline = async (args, json) => {
   }
 };
 
+cmds.transfer = async (args, json) => {
+  if (args._.length !== 1) throw new Error("Usage: bdp transfer <url> [--pwd CODE] [--dry-run] [--yes]");
+  const { planTransfer, transferShare } = require("../lib/share-transfer");
+  planTransfer(args._[0], args.flags.pwd); // Reject invalid input before asking for confirmation.
+  if (!args.flags.dryRun && !(await requireYes(args, json, "分享链接转存", "保存到引擎当前网盘目录，需要已登录账号"))) return 1;
+  const result = await transferShare(args._[0], {
+    password: args.flags.pwd,
+    dryRun: args.flags.dryRun === true,
+    confirm: !args.flags.dryRun,
+  });
+  output(result, json, () => console.log(result.dryRun
+    ? "[dry-run] 将转存整个分享至引擎当前网盘目录；提取码已提供，不会调用引擎"
+    : sanitizeControl(result.raw)));
+};
+
 cmds.share = async (args, json) => {
   const action = args._[0] || "list";
   if (action === "set") {
@@ -2146,6 +2166,15 @@ const COMMANDS = {
     note: "clean 清空不可恢复，非交互环境必须加 --yes；BaiduPCS-Go 不二次确认",
     options: ["--page <N> 回收站列表页码 (默认1)", "--yes 清空回收站（不可恢复）时显式确认"],
     examples: ["bdp recycle list", "bdp recycle restore 378804494923604", "bdp recycle clean --yes"],
+  },
+  transfer: {
+    group: "pan",
+    usage: "bdp transfer <url> [--pwd CODE] [--dry-run] [--yes]",
+    desc: "将个人版分享链接中的文件/目录转存到引擎当前网盘目录（需要登录）",
+    flags: ["pwd", "dryRun", "yes"],
+    note: "v4.0.1 引擎要求四位提取码；显式 --pwd 优先于链接内 pwd。转存整个分享，不下载、不变更引擎工作目录；同名冲突遵循引擎行为。此命令仅通过 CLI 提供。",
+    options: ["--pwd <CODE> 四位提取码，也可放在 URL 的 ?pwd=CODE 中", "--dry-run 仅展示计划，不调用引擎", "--yes 确认写入网盘"],
+    examples: ["bdp transfer 'https://pan.baidu.com/s/1Example?pwd=abcd' --dry-run --json", "bdp transfer https://pan.baidu.com/s/1Example --pwd abcd --yes --json"],
   },
   share: {
     group: "pan",

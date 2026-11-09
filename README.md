@@ -61,6 +61,7 @@
 | 回收站 | `bdp recycle list/restore/clean` | 列出/还原/清空回收站 |
 | 离线下载 | `bdp offline add <url>` | 百度服务器代下 |
 | 分享管理 | `bdp share set/cancel` | 生成/取消分享链接 |
+| 分享转存 | `bdp transfer <url> --pwd CODE --yes` | 登录后将整个分享转存到引擎当前网盘目录 |
 | **列出群组** | `bdp groups` | 所有群聊 + gid |
 | **群内分享库** | `bdp gshares <gid>` | 顶层分享目录 |
 | **浏览群文件** | `bdp gls <gid> <fs_id>` | 分页 + 递归 |
@@ -297,6 +298,7 @@ bdp offline list                 离线任务列表
 bdp share set <path> [--pwd P]   创建分享链接 [--combined 输出带密码链接]
 bdp share cancel <id>...         取消分享
 bdp share list                   列出分享 (受 BaiduPCS-Go v4.0.1 引擎 bug 限制)
+bdp transfer <url> --pwd CODE    转存整个个人版分享（--yes 执行，--dry-run 仅展示计划）
 bdp profile list / use <name>    多账号 profile 管理
 bdp serve --mcp                 启动 MCP 服务器 (stdio) -- 23 个带 schema 的工具
 bdp serve --mcp --http [--port N] [--host H] [--token T]  MCP over HTTP
@@ -336,7 +338,9 @@ bdp error --list [--json]       列出全部已知错误码
 
 ### 通用选项
 
-> 当前共 **39** 条 CLI 命令、**23** 个 MCP 工具、**13** 个内置错误码。
+> 当前共 **40** 条 CLI 命令、**23** 个 MCP 工具、**13** 个内置错误码。
+
+`bdp transfer` 支持完整的 `/s/1...` 或 `/share/init?surl=...` 个人版链接，以及 URL 自带的 `?pwd=...`（显式 `--pwd` 优先）。需要先用 `bdp login` 登录引擎；v4.0.1 实际要求四位字母数字提取码，无提取码分享暂不支持。它保存整个分享到 **BaiduPCS-Go 当前网盘工作目录**，不修改该目录设置、不提供覆盖开关、不下载到本地；同名冲突和目录存在性由引擎处理。`--dry-run` 只校验参数并展示计划，不联网检查链接、提取码或登录态。首版仅提供 CLI，不包含企业版分享、匿名下载或 MCP 工具。
 
 ```
 --json                           JSON 结构化输出 (Agent 友好)
