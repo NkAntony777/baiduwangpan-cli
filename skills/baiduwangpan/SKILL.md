@@ -108,6 +108,7 @@ bdp du [path]                      # 目录容量分析
 bdp offline add <http_url>         # 离线下载
 bdp recycle list                   # 回收站
 bdp share set|cancel|list          # 分享管理
+bdp transfer <url> --pwd CODE --yes # 分享转存（需登录；--dry-run 仅展示计划）
 ```
 
 ### 内容深度工具（v1.8.0 起）

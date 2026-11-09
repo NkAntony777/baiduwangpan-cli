@@ -664,6 +664,20 @@ bdp offline list
 - ⚠️ **创建离线任务需要 `--yes`**（非交互环境），且**拒绝**非 http(s) 与内网/本机地址
   （如 `169.254.169.254`、`127.0.0.1`、`192.168.*`、`file://`）——否则百度服务器会变成 SSRF 跳板
 
+### transfer — 分享链接转存（CLI）
+
+```bash
+bdp transfer 'https://pan.baidu.com/s/1Example?pwd=abcd' --dry-run --json
+bdp transfer https://pan.baidu.com/s/1Example --pwd abcd --yes --json
+```
+
+- 需要引擎已登录；支持完整的个人版 `/s/1...` 或 `/share/init?surl=...` 链接。显式 `--pwd` 优先于链接内的 `pwd`。
+- BaiduPCS-Go v4.0.1 实际要求四位字母数字提取码，无提取码分享暂不支持。
+- 将整个分享保存到引擎当前网盘工作目录；不改变工作目录设置，不提供覆盖开关，不下载到本地。同名冲突遵循引擎行为；不支持文件/子目录选择参数。
+- `--dry-run` 不调用引擎，只展示计划，不验证远端链接、提取码或登录态。实际写入需要 `--yes`（交互终端可确认）。
+- JSON 成功返回 `success/url/destination/requiresLogin/raw`；`destination` 固定为 `engine-workdir`，不是推测的保存路径。dry-run 返回 `dryRun/requiresConfirmation`，不包含提取码。
+- 首版仅提供 CLI，不包含 MCP 工具、企业版分享或匿名下载。
+
 ### share — 分享管理
 
 ```

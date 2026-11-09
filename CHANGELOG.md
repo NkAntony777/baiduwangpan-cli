@@ -4,6 +4,13 @@
 
 -----
 
+## Unreleased
+
+- 新增 `bdp transfer <url> [--pwd CODE] [--dry-run] [--yes]`，异步封装 BaiduPCS-Go v4.0.1 的个人版分享转存。实际写入需确认，dry-run 不调用引擎。
+- 明确引擎当前网盘工作目录、四位提取码要求和整份分享转存的限制；失败正文或异常退出不能伪装成成功。
+- 补充参数、确认、CLI JSON 和假引擎端到端测试。测试总数 444 → **459**。
+- 重建 `baiduwangpan-skill.zip`（41,385 字节 / 8 个文件）。
+
 ## v1.11.3 — 2026-11-02
 
 > 主题：**把剩下的同步 curl 和缺的命令补上**。群文件下载、curl 传输、预览 HEAD 不再冻住事件循环。MCP 补齐群工具。CLI 补上 `rename` 与 `doctor`。
