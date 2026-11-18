@@ -4,6 +4,15 @@
 
 -----
 
+## Unreleased
+
+- 新增 `CONTRIBUTING.md`：README 顶部的 **PRs Welcome** 徽章此前指向缺失的文件（404）。
+  内容涵盖改动前是否需要先开 Issue、本地环境与测试方式、CLI/MCP/Skill 文档同步
+  要求、PR 范围与提交信息、发布产物 `baiduwangpan-skill.zip` 的重建流程，
+  以及本项目的安全底线（不提交凭证、不谎报成功、引擎输出视为不可信输入）。
+- 测试总数 444 → **444**（本次仅新增文档，未新增用例）。
+- `baiduwangpan-skill.zip` 未变化，仍为 40,873 字节（8 个文件）。
+
 ## v1.11.3 — 2026-11-02
 
 > 主题：**把剩下的同步 curl 和缺的命令补上**。群文件下载、curl 传输、预览 HEAD 不再冻住事件循环。MCP 补齐群工具。CLI 补上 `rename` 与 `doctor`。
