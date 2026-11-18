@@ -116,7 +116,7 @@ test("MCP: bdp_dedup / bdp_organize 的 depth 被钳制到 32", async () => {
 // A-10：pcsPath 必须精确匹配引擎名
 test("config: pcsPath 只接受精确的引擎文件名（前缀匹配会放行任意 exe）", () => {
   assert.equal(config.validateConfigValue("pcsPath", "BaiduPCS-Go.exe").ok, true);
-  assert.equal(config.validateConfigValue("pcsPath", "BaiduPCS-Go-v4.0.1-windows-x64.exe").ok, true);
+  assert.equal(config.validateConfigValue("pcsPath", "BaiduPCS-Go-v4.0.2-windows-x64.exe").ok, true);
   for (const bad of ["BaiduPCS-GoX.exe", "BaiduPCS-Gonevil.exe", "C:/Windows/System32/hostname.exe"]) {
     const r = config.validateConfigValue("pcsPath", bad);
     assert.equal(r.ok, false, bad + " 应被拒绝");
