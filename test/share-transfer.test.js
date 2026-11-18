@@ -11,7 +11,7 @@ process.env.BDP_CONFIG_DIR = dir;
 const marker = path.join(dir, "calls.json");
 const engine = path.join(dir, "BaiduPCS-Go");
 fs.writeFileSync(path.join(dir, "config.json"), JSON.stringify({ pcsPath: engine }), "utf8");
-const { planTransfer, transferShare } = require("../lib/share-transfer");
+const { planTransfer, transferShare, classifyTransferOutput } = require("../lib/share-transfer");
 const { SLOW_ENGINE_COMMANDS } = require("../lib/engine-timeout");
 const CLI = path.join(__dirname, "..", "bin", "bdp.js");
 const URL = "https://pan.baidu.com/s/1Example";
@@ -102,6 +102,57 @@ test("transfer: empty or unrecognized output cannot be reported as success", nee
     fakeEngine(output);
     await assert.rejects(transferShare(URL, { password: "abcd", confirm: true }), /未返回明确的转存成功/);
   }
+});
+
+// 上游 v4.0.1（internal/pcscommand/transfer.go）在转存**成功**后即结束 ——
+// 成功行是 stdout 的最后一行。此前的实现用 `/^…$/m` 逐行匹配，
+// 于是"成功行之后还有别的输出"也会被判成成功。
+//
+// 这些断言走纯函数 classifyTransferOutput，因此在**所有平台**都执行
+//（不依赖可执行假引擎，不会在 Windows 上被 skip）。
+test("transfer: the success line must be the last thing the engine printed", () => {
+  assert.equal(classifyTransferOutput(SUCCESS).ok, true);
+  assert.equal(classifyTransferOutput(SUCCESS.replace("\n", "")).ok, true);
+  // 上游 --download 会在成功行之后继续输出；本命令不启用它，但引擎输出
+  // 里若出现成功行之后的内容，就不能算作"明确的成功结果"。
+  for (const output of [
+    SUCCESS + "10s后开始下载\n",
+    SUCCESS + "额外的噪声输出\n",
+    SUCCESS + "分享链接转存到网盘失败: 提取码错误\n",
+  ]) {
+    assert.equal(classifyTransferOutput(output).ok, false, JSON.stringify(output));
+  }
+});
+
+test("transfer: a failure line wins over a success-looking line", () => {
+  const verdict = classifyTransferOutput(
+    "分享链接转存到网盘成功, 保存了X到当前目录\n分享链接转存到网盘失败: 提取码错误\n"
+  );
+  assert.equal(verdict.ok, false);
+  assert.match(verdict.reason, /提取码错误/);
+});
+
+test("transfer: the success line must match upstream's exact wording", () => {
+  // 逗号必须是 ASCII 半角；全角逗号不算上游的格式。
+  assert.equal(classifyTransferOutput("分享链接转存到网盘成功，保存了X到当前目录\n").ok, false);
+  // 缺少"保存了…到当前目录"外壳也不是上游的格式。
+  assert.equal(classifyTransferOutput("分享链接转存到网盘成功\n").ok, false);
+  assert.equal(classifyTransferOutput("").ok, false);
+  assert.equal(classifyTransferOutput("未登录百度账号\n").ok, false);
+});
+
+test("transfer: a generic engine error is reported as a failure", () => {
+  const verdict = classifyTransferOutput("遇到错误, 远端服务器返回错误, 代码: 2, 消息: boom\n");
+  assert.equal(verdict.ok, false);
+  assert.equal(verdict.errno, 2);
+});
+
+// 提取码字符集是**本 CLI 自加**的限制（上游只查长度是否为 4），
+// 文档不得把它说成引擎的要求。
+test("transfer: the code charset rule is a CLI-side restriction, not an engine rule", () => {
+  assert.throws(() => planTransfer(URL, "ab-d"), /四位字母数字/);
+  assert.throws(() => planTransfer(URL, "ab-d"), /本 CLI 的安全限制/);
+  assert.throws(() => planTransfer(URL, "ab-d"), /引擎本身只要求长度为 4/);
 });
 
 test("transfer: use the existing write-operation timeout policy", () => {

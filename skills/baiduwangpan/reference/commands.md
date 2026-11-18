@@ -672,7 +672,7 @@ bdp transfer https://pan.baidu.com/s/1Example --pwd abcd --yes --json
 ```
 
 - 需要引擎已登录；支持完整的个人版 `/s/1...` 或 `/share/init?surl=...` 链接。显式 `--pwd` 优先于链接内的 `pwd`。
-- BaiduPCS-Go v4.0.1 实际要求四位字母数字提取码，无提取码分享暂不支持。
+- 提取码必须是四位字母数字（本 CLI 的安全限制；引擎 v4.0.1 只校验长度是否为 4），无提取码分享暂不支持。
 - 将整个分享保存到引擎当前网盘工作目录；不改变工作目录设置，不提供覆盖开关，不下载到本地。同名冲突遵循引擎行为；不支持文件/子目录选择参数。
 - `--dry-run` 不调用引擎，只展示计划，不验证远端链接、提取码或登录态。实际写入需要 `--yes`（交互终端可确认）。
 - JSON 成功返回 `success/url/destination/requiresLogin/raw`；`destination` 固定为 `engine-workdir`，不是推测的保存路径。dry-run 返回 `dryRun/requiresConfirmation`，不包含提取码。

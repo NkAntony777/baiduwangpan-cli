@@ -2172,8 +2172,8 @@ const COMMANDS = {
     usage: "bdp transfer <url> [--pwd CODE] [--dry-run] [--yes]",
     desc: "将个人版分享链接中的文件/目录转存到引擎当前网盘目录（需要登录）",
     flags: ["pwd", "dryRun", "yes"],
-    note: "v4.0.1 引擎要求四位提取码；显式 --pwd 优先于链接内 pwd。转存整个分享，不下载、不变更引擎工作目录；同名冲突遵循引擎行为。此命令仅通过 CLI 提供。",
-    options: ["--pwd <CODE> 四位提取码，也可放在 URL 的 ?pwd=CODE 中", "--dry-run 仅展示计划，不调用引擎", "--yes 确认写入网盘"],
+    note: "提取码须为四位字母数字（本 CLI 的安全限制；引擎 v4.0.1 只校验长度是否为 4）；显式 --pwd 优先于链接内 pwd。转存整个分享，不下载、不变更引擎工作目录；同名冲突遵循引擎行为。此命令仅通过 CLI 提供。",
+    options: ["--pwd <CODE> 四位字母数字提取码，也可放在 URL 的 ?pwd=CODE 中", "--dry-run 仅展示计划，不调用引擎", "--yes 确认写入网盘"],
     examples: ["bdp transfer 'https://pan.baidu.com/s/1Example?pwd=abcd' --dry-run --json", "bdp transfer https://pan.baidu.com/s/1Example --pwd abcd --yes --json"],
   },
   share: {
