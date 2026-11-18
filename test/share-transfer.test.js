@@ -141,6 +141,30 @@ test("transfer: the success line must match upstream's exact wording", () => {
   assert.equal(classifyTransferOutput("未登录百度账号\n").ok, false);
 });
 
+// 上游 v4.0.1 baidupcs/baidupcs.go:86
+//   OperationShareFileSavetoLocal = "分享链接转存到网盘"
+// internal/pcscommand/transfer.go:107
+//   fmt.Printf("%s成功, 保存了%s到当前目录\n", OperationShareFileSavetoLocal, resp["filename"])
+// 上游转存.go 的失败行（transfer.go:18/26/38/44/61/69/84/97）：
+//   fmt.Printf("%s失败: %s\n", OperationShareFileSavetoLocal, <原因>)
+// 下面逐条断言判定与上游格式完全一致（成功/失败各含真实文案）。
+test("transfer: verdicts match upstream's exact success and failure formats", () => {
+  for (const name of ["报告.pdf", "[报告.pdf 资料]", "文件夹", "a b c"]) {
+    const ok = classifyTransferOutput(`分享链接转存到网盘成功, 保存了${name}到当前目录\n`);
+    assert.equal(ok.ok, true, "上游成功行应判定为成功: " + name);
+  }
+  for (const reason of [
+    "链接格式非法",
+    "秒传已不再被支持",
+    "链接地址或提取码非法",
+    "请确认登录参数中已经包含了网盘STOKEN",
+  ]) {
+    const verdict = classifyTransferOutput(`分享链接转存到网盘失败: ${reason}\n`);
+    assert.equal(verdict.ok, false, "上游失败行应判定为失败: " + reason);
+    assert.match(verdict.reason, new RegExp(reason.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  }
+});
+
 test("transfer: a generic engine error is reported as a failure", () => {
   const verdict = classifyTransferOutput("遇到错误, 远端服务器返回错误, 代码: 2, 消息: boom\n");
   assert.equal(verdict.ok, false);
