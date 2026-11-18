@@ -62,6 +62,35 @@ test.afterEach(async () => {
   await fs.rm(temp, { recursive: true, force: true });
 });
 
+// ── errno=142：成员被移除后的跨账号权限失效（2026-11 双账号实测）──────────
+
+test("errno=142 已登记为 SHARED_PERMISSION_DENIED（fatal / 不可重试）", () => {
+  const info = require("../lib/error-codes").describeError("142");
+  assert.equal(info.name, "SHARED_PERMISSION_DENIED");
+  assert.equal(info.code, 142);
+  assert.equal(info.severity, "fatal");
+  assert.equal(info.retryable, false);
+  assert.match(info.description, /无权限访问该共享目录/);
+  assert.match(info.action, /邀请/, "应指出下一步是让拥有者重新邀请");
+});
+
+test("shared ls: 服务端只回 errno=142 时，用已登记的错误说明兜底", async () => {
+  responder = (url, options) => {
+    // 实测：被移出共享目录后，服务端只回 errno，不带任何文案
+    if (url.pathname === "/api/list") return { errno: 142 };
+    return fixture(url, options);
+  };
+  await assert.rejects(
+    () => shared.ls(ROOT),
+    (err) => {
+      assert.equal(err.errno, 142);
+      assert.match(err.message, /无权限访问该共享目录/, "应使用已登记的错误说明");
+      assert.doesNotMatch(err.message, /响应不是有效的成功结果/, "不应只丢一句无信息量的兜底文案");
+      return true;
+    }
+  );
+});
+
 test("shared paths preserve owner UK and folder FID without converting to numbers", () => {
   const target = "/<share>90071992547409931234-90071992547409935678/资料";
   assert.equal(shared.remotePath(target, true), target);
