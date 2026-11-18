@@ -21,6 +21,7 @@
  *   bdp offline add <url> / list   离线下载
  *   bdp share set/cancel/list      分享管理
  *   bdp shared <action>           个人版共享文件夹（右键“共享”）
+ *   bdp transfer <url> --pwd CODE  转存分享文件/目录
  *   bdp profile list/use/unset     多账号 profile 切换
  *
  * 群聊文件操作:
@@ -289,7 +290,11 @@ function parseArgs(argv) {
     } else if (arg === "--glob") {
       opts.flags.glob = true;
     } else if (arg === "--pwd" || arg === "--password") {
-      opts.flags.pwd = argv[++i];
+      const value = argv[i + 1];
+      const error = flagValueError(arg, value, "请在选项后提供提取码");
+      if (error) throw new FlagValueError(error);
+      opts.flags.pwd = value;
+      i++;
     } else if (arg === "--combined") {
       opts.flags.combined = true;
     } else if (arg === "--dry-run") {
@@ -1264,6 +1269,21 @@ cmds.shared = async (args, json) => {
   output(result, json, () => console.log(sanitizeControl(JSON.stringify(result, null, 2))));
 };
 
+cmds.transfer = async (args, json) => {
+  if (args._.length !== 1) throw new Error("Usage: bdp transfer <url> [--pwd CODE] [--dry-run] [--yes]");
+  const { planTransfer, transferShare } = require("../lib/share-transfer");
+  planTransfer(args._[0], args.flags.pwd); // Reject invalid input before asking for confirmation.
+  if (!args.flags.dryRun && !(await requireYes(args, json, "分享链接转存", "保存到引擎当前网盘目录，需要已登录账号"))) return 1;
+  const result = await transferShare(args._[0], {
+    password: args.flags.pwd,
+    dryRun: args.flags.dryRun === true,
+    confirm: !args.flags.dryRun,
+  });
+  output(result, json, () => console.log(result.dryRun
+    ? "[dry-run] 将转存整个分享至引擎当前网盘目录；提取码已提供，不会调用引擎"
+    : sanitizeControl(result.raw)));
+};
+
 cmds.share = async (args, json) => {
   const action = args._[0] || "list";
   if (action === "set") {
@@ -2181,6 +2201,15 @@ const COMMANDS = {
     options: ["--yes 确认设置共享、生成邀请链接、移除成员或上传", "--dry-run 写操作和下载只展示计划，不请求接口", "--page <N> list/ls/members 的页码（默认 1）", "-o <dir> shared get 保存目录"],
     note: "使用个人版 /sharedir 接口，不是团队空间或普通分享链接。先用 mkdir 创建自己的目录，再 shared create；成员通过邀请链接加入。拥有者使用自己的真实共享路径，接收者使用 list 返回的 /<share>拥有者UK-目录FID 路径。首版单文件上限 32MiB，不覆盖同名文件；移除成员不删除其文件。",
     examples: ["bdp shared list --json", "bdp shared create /协作资料 --yes --json", "bdp shared invite /协作资料 --yes --json", "bdp shared put ./note.txt '/<share>123-456' --yes", "bdp shared get '/<share>123-456/note.txt' -o ./downloads"],
+  },
+  transfer: {
+    group: "pan",
+    usage: "bdp transfer <url> [--pwd CODE] [--dry-run] [--yes]",
+    desc: "将个人版分享链接中的文件/目录转存到引擎当前网盘目录（需要登录）",
+    flags: ["pwd", "dryRun", "yes"],
+    note: "提取码须为四位字母数字（本 CLI 的安全限制；引擎 v4.0.1 只校验长度是否为 4）；显式 --pwd 优先于链接内 pwd。转存整个分享，不下载、不变更引擎工作目录；同名冲突遵循引擎行为。此命令仅通过 CLI 提供。",
+    options: ["--pwd <CODE> 四位字母数字提取码，也可放在 URL 的 ?pwd=CODE 中", "--dry-run 仅展示计划，不调用引擎", "--yes 确认写入网盘"],
+    examples: ["bdp transfer 'https://pan.baidu.com/s/1Example?pwd=abcd' --dry-run --json", "bdp transfer https://pan.baidu.com/s/1Example --pwd abcd --yes --json"],
   },
   share: {
     group: "pan",

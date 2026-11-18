@@ -690,6 +690,19 @@ bdp shared cancel /协作资料 --yes --json
 - 移除成员固定 `delete_files=0`，不删除其已上传内容；不支持自动更改共享成员的角色。
 - `list`、`members`、`ls` 支持 `--page`（默认 1）；接收列表和目录每页 100 条，成员每页 50 条，返回后续分页提示。
 - 所有命令沿用 JSON 信封。首版没有新增 MCP 工具。
+### transfer — 分享链接转存（CLI）
+
+```bash
+bdp transfer 'https://pan.baidu.com/s/1Example?pwd=abcd' --dry-run --json
+bdp transfer https://pan.baidu.com/s/1Example --pwd abcd --yes --json
+```
+
+- 需要引擎已登录；支持完整的个人版 `/s/1...` 或 `/share/init?surl=...` 链接。显式 `--pwd` 优先于链接内的 `pwd`。
+- 提取码必须是四位字母数字（本 CLI 的安全限制；引擎 v4.0.1 只校验长度是否为 4），无提取码分享暂不支持。
+- 将整个分享保存到引擎当前网盘工作目录；不改变工作目录设置，不提供覆盖开关，不下载到本地。同名冲突遵循引擎行为；不支持文件/子目录选择参数。
+- `--dry-run` 不调用引擎，只展示计划，不验证远端链接、提取码或登录态。实际写入需要 `--yes`（交互终端可确认）。
+- JSON 成功返回 `success/url/destination/requiresLogin/raw`；`destination` 固定为 `engine-workdir`，不是推测的保存路径。dry-run 返回 `dryRun/requiresConfirmation`，不包含提取码。
+- 首版仅提供 CLI，不包含 MCP 工具、企业版分享或匿名下载。
 
 ### share — 分享管理
 

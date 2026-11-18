@@ -112,6 +112,7 @@ bdp shared list                   # 个人版“共享给我的文件夹”（�
 bdp shared create <own-dir> --yes  # 将已有普通文件夹设为共享，生成邀请链接
 bdp shared put <local> <dir> --yes # 共享目录上传（首版单文件 <=32MiB）
 bdp shared get <file> [-o dir]     # 共享文件下载，-o 指定本地目录
+bdp transfer <url> --pwd CODE --yes # 分享转存（需登录；--dry-run 仅展示计划）
 ```
 
 ### 内容深度工具（v1.8.0 起）
