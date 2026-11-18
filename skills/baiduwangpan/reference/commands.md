@@ -219,7 +219,7 @@ bdp organize [path] --by type --apply --yes   # 执行（真实移动网盘文�
 v1.9.0 起，每条命令的 `--json` 输出都会**追加**一个 `meta` 字段（只追加，不改任何既有字段）：
 
 ```json
-"meta": { "command": "ls", "version": "1.11.3", "profile": null, "elapsedMs": 42 }
+"meta": { "command": "ls", "version": "1.12.0", "profile": null, "elapsedMs": 42 }
 ```
 
 | 字段 | 含义 |
@@ -632,7 +632,7 @@ bdp error --list --json     # 列出全部已知错误码
   "error": "文件或目录不存在",
   "errno": 31066,
   "errorCode": { "code": 31066, "name": "FILE_NOT_FOUND", "severity": "user-error", "retryable": false, "action": "…" },
-  "meta": { "command": "ls", "version": "1.11.3", "profile": null, "elapsedMs": 12 }
+  "meta": { "command": "ls", "version": "1.12.0", "profile": null, "elapsedMs": 12 }
 }
 ```
 
