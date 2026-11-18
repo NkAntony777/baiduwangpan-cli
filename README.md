@@ -82,7 +82,7 @@ npm install -g baiduwangpan-cli
 ```
 
 安装时会**自动下载** BaiduPCS-Go 引擎（镜像优先加速，国内也能装；全部下载源失败时打印手动下载地址，不阻断安装）。
-CLI 会自动发现引擎（包根固定路径或 `BaiduPCS-Go-v4.0.1-windows-x64/` 版本子目录），升级不会丢 `pcsPath` 配置。也支持手动克隆：
+CLI 会自动发现引擎（包根固定路径或 `BaiduPCS-Go-v4.0.2-windows-x64/` 版本子目录），升级不会丢 `pcsPath` 配置。也支持手动克隆：
 
 ```bash
 git clone https://github.com/NkAntony777/baiduwangpan-cli.git
@@ -215,7 +215,7 @@ bdp offline add <url> [--path D] 离线下载 (百度服务器代下)
 bdp offline list                 离线任务列表
 bdp share set <path> [--pwd P]   创建分享链接 [--combined 输出带密码链接]
 bdp share cancel <id>...         取消分享
-bdp share list                   列出分享 (受 BaiduPCS-Go v4.0.1 引擎 bug 限制)
+bdp share list                   列出分享 (受 BaiduPCS-Go v4.0.2 引擎 bug 限制)
 bdp transfer <url> --pwd CODE    转存整个个人版分享（--yes 执行，--dry-run 仅展示计划）
 bdp profile list / use <name>    多账号 profile 管理
 bdp serve --mcp                 启动 MCP 服务器 (stdio) -- 23 个带 schema 的工具
@@ -258,7 +258,7 @@ bdp error --list [--json]       列出全部已知错误码
 
 > 当前共 **40** 条 CLI 命令、**23** 个 MCP 工具、**13** 个内置错误码。
 
-`bdp transfer` 支持完整的 `/s/1...` 或 `/share/init?surl=...` 个人版链接，以及 URL 自带的 `?pwd=...`（显式 `--pwd` 优先）。需要先用 `bdp login` 登录引擎；提取码必须是四位字母数字（**本 CLI 的安全限制**：引擎 v4.0.1 只校验长度是否为 4），无提取码分享暂不支持。它保存整个分享到 **BaiduPCS-Go 当前网盘工作目录**，不修改该目录设置、不提供覆盖开关、不下载到本地；同名冲突和目录存在性由引擎处理。`--dry-run` 只校验参数并展示计划，不联网检查链接、提取码或登录态。首版仅提供 CLI，不包含企业版分享、匿名下载或 MCP 工具。
+`bdp transfer` 支持完整的 `/s/1...` 或 `/share/init?surl=...` 个人版链接，以及 URL 自带的 `?pwd=...`（显式 `--pwd` 优先）。需要先用 `bdp login` 登录引擎；提取码必须是四位字母数字（**本 CLI 的安全限制**：引擎 v4.0.2 只校验长度是否为 4），无提取码分享暂不支持。**引擎必须是 BaiduPCS-Go v4.0.2+**：v4.0.1 有上游缺陷 #534 —— 百度反爬会把分享页弹成不含 `loginstate` 的页面，引擎因而误报「请确认登录参数中已经包含了网盘STOKEN」（与你的 STOKEN 无关）。CLI 在转存前会检查引擎版本，过旧时直接给出升级指引。它保存整个分享到 **BaiduPCS-Go 当前网盘工作目录**，不修改该目录设置、不提供覆盖开关、不下载到本地；同名冲突和目录存在性由引擎处理。`--dry-run` 只校验参数并展示计划，不联网检查链接、提取码或登录态。首版仅提供 CLI，不包含企业版分享、匿名下载或 MCP 工具。
 
 ```
 --json                           JSON 结构化输出 (Agent 友好)
@@ -553,7 +553,7 @@ skills/baiduwangpan/
 - **下载限速**：非 SVIP 用户下载受百度限速策略限制
 - **cat 限制**：为防止误读超大文件，`cat` 默认限制 1MB，可通过 `BDP_MAX_CAT_BYTES` 环境变量调整
 - **群聊文件**：群聊 API 为逆向获取，可能随百度服务端变更而失效
-- **share list**：v1.7.0 起改走网页 API（BaiduPCS-Go v4.0.1 引擎的 `share list` 有 panic bug，网页 API 正常）
+- **share list**：v1.7.0 起改走网页 API（BaiduPCS-Go v4.0.2 引擎的 `share list` 有 panic bug，网页 API 正常）
 - **rm 高危**：非交互环境（Agent/管道）执行 `bdp rm` 必须显式加 `--yes`，否则拒绝执行并返回退出码 1；交互终端会弹 y/N 确认
 - **config 脱敏**：`bdp config` / `bdp config --json` 默认对 BDUSS/STOKEN 脱敏（`"redacted": true`），仅 `--show-secrets` 才输出原值
 - **du 的 size 可能偏小**：百度没有服务端目录大小接口，`du` 靠递归求和，默认只扫 3 层；JSON 里 `partial: true` 表示因深度封顶而不完整，**实际占用以 `bdp quota` 为准**

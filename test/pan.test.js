@@ -455,7 +455,7 @@ test("du: 深度封顶 → 子目录标记 capped 且不递归", async () => {
   assert.equal(r2.size, 999);
 });
 
-test("getFileMeta: 解析 BaiduPCS-Go v4.0.1 真实输出格式", async () => {
+test("getFileMeta: 解析 BaiduPCS-Go v4.0.2 真实输出格式", async () => {
   const meta = await pan.getFileMeta("/docs/报告.pdf");
   assert.equal(meta.size, 1000); // "文件大小 1000, 0.98KB" 取精确字节
   assert.equal(meta.md5, "abcdef0123456789abcdef0123456789");

@@ -104,7 +104,7 @@ test("transfer: empty or unrecognized output cannot be reported as success", nee
   }
 });
 
-// 上游 v4.0.1（internal/pcscommand/transfer.go）在转存**成功**后即结束 ——
+// 上游 v4.0.2（internal/pcscommand/transfer.go）在转存**成功**后即结束 ——
 // 成功行是 stdout 的最后一行。此前的实现用 `/^…$/m` 逐行匹配，
 // 于是"成功行之后还有别的输出"也会被判成成功。
 //
@@ -141,7 +141,7 @@ test("transfer: the success line must match upstream's exact wording", () => {
   assert.equal(classifyTransferOutput("未登录百度账号\n").ok, false);
 });
 
-// 上游 v4.0.1 baidupcs/baidupcs.go:86
+// 上游 v4.0.2 baidupcs/baidupcs.go:86
 //   OperationShareFileSavetoLocal = "分享链接转存到网盘"
 // internal/pcscommand/transfer.go:107
 //   fmt.Printf("%s成功, 保存了%s到当前目录\n", OperationShareFileSavetoLocal, resp["filename"])

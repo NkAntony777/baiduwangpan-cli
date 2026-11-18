@@ -219,7 +219,7 @@ bdp organize [path] --by type --apply --yes   # 执行（真实移动网盘文�
 v1.9.0 起，每条命令的 `--json` 输出都会**追加**一个 `meta` 字段（只追加，不改任何既有字段）：
 
 ```json
-"meta": { "command": "ls", "version": "1.12.0", "profile": null, "elapsedMs": 42 }
+"meta": { "command": "ls", "version": "1.12.1", "profile": null, "elapsedMs": 42 }
 ```
 
 | 字段 | 含义 |
@@ -632,7 +632,7 @@ bdp error --list --json     # 列出全部已知错误码
   "error": "文件或目录不存在",
   "errno": 31066,
   "errorCode": { "code": 31066, "name": "FILE_NOT_FOUND", "severity": "user-error", "retryable": false, "action": "…" },
-  "meta": { "command": "ls", "version": "1.12.0", "profile": null, "elapsedMs": 12 }
+  "meta": { "command": "ls", "version": "1.12.1", "profile": null, "elapsedMs": 12 }
 }
 ```
 
@@ -672,7 +672,8 @@ bdp transfer https://pan.baidu.com/s/1Example --pwd abcd --yes --json
 ```
 
 - 需要引擎已登录；支持完整的个人版 `/s/1...` 或 `/share/init?surl=...` 链接。显式 `--pwd` 优先于链接内的 `pwd`。
-- 提取码必须是四位字母数字（本 CLI 的安全限制；引擎 v4.0.1 只校验长度是否为 4），无提取码分享暂不支持。
+- **引擎必须是 BaiduPCS-Go v4.0.2+**（上游缺陷 #534：v4.0.1 会被百度反爬拦分享页，误报「请确认登录参数中已经包含了网盘STOKEN」）。CLI 在转存前核对引擎版本，过旧时直接报错并给出升级命令，不做无谓的联网尝试。
+- 提取码必须是四位字母数字（本 CLI 的安全限制；引擎 v4.0.2 只校验长度是否为 4），无提取码分享暂不支持。
 - 将整个分享保存到引擎当前网盘工作目录；不改变工作目录设置，不提供覆盖开关，不下载到本地。同名冲突遵循引擎行为；不支持文件/子目录选择参数。
 - `--dry-run` 不调用引擎，只展示计划，不验证远端链接、提取码或登录态。实际写入需要 `--yes`（交互终端可确认）。
 - JSON 成功返回 `success/url/destination/requiresLogin/raw`；`destination` 固定为 `engine-workdir`，不是推测的保存路径。dry-run 返回 `dryRun/requiresConfirmation`，不包含提取码。
@@ -691,7 +692,7 @@ bdp share list
 - ⚠️ **创建公开分享链接需要 `--yes`**（非交互环境）—— 链接一旦生成，任何拿到它的人都能访问该文件
 - `--combined` 直接输出带提取码的可复制链接
 - `share list` 走**网页 API** `/share/record`（v1.7.0 起）。
-  BaiduPCS-Go v4.0.1 引擎的 `share list` 有 panic bug，网页 API 正常，
+  BaiduPCS-Go v4.0.2 引擎的 `share list` 有 panic bug，网页 API 正常，
   输出含 shareId / 链接 / 提取码 / 过期时间 / 浏览次数，`source` 字段标明来源
 
 ### doctor — 一次做完健康检查
