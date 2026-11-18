@@ -19,7 +19,11 @@ function fixture(url, options) {
   const target = url.searchParams.get("target");
   switch (url.pathname) {
     case "/api/gettemplatevariable": return { errno: 0, result: { uk: "123" } };
-    case "/api/filemetas": return { errno: 0, info: [{ path: JSON.parse(target)[0], fs_id: "456", isdir: 1, share: 1 }] };
+    case "/api/filemetas": {
+      // target 是数组：可能一次查多个路径（批量取祖先链元信息）。
+      const paths = JSON.parse(target);
+      return { errno: 0, info: paths.map(p => ({ path: p, fs_id: "456", isdir: 1, share: 1 })) };
+    }
     case "/sharedir/create": case "/sharedir/invite/link": return { errno: 0, link: "https://pan.baidu.com/sharedir/invite?key=example" };
     case "/sharedir/list": return { errno: 0, has_more: 0, list: [{ fid: "456", uk: "123", path: ROOT, server_filename: "资料" }] };
     case "/sharedir/member/list": return { errno: 0, list: [{ uk: "123", show_name: "owner" }] };
@@ -223,6 +227,46 @@ test("shared download does not save truncated content or follow untrusted PCS ad
   await assert.rejects(fs.stat(path.join(temp, "note.txt")), e => e.code === "ENOENT");
   responder = () => ({ errno: 0, info: [{ fs_id: "789", path: ROOT + "/note.txt", isdir: 0, size: 5, dlink: "https://evil.example/file" }] });
   await assert.rejects(shared.get(ROOT + "/note.txt", temp), /非百度 PCS/);
+});
+
+// 百度 dlink 有时以 http:// 下发。直接拒绝会让真实环境下载失败；
+// 但放行 http 又会把 BDUSS Cookie 明文发出去。
+// 正确做法：主机白名单仍是边界，scheme 升级到 https。
+test("shared download upgrades an http dlink to https instead of rejecting it", async () => {
+  responder = () => ({ errno: 0, info: [{ fs_id: "789", path: ROOT + "/note.txt", isdir: 0, size: 5, dlink: "http://d.pcs.baidu.com/file/test" }] });
+  const seen = [];
+  http.curlRange = async (url) => { seen.push(url); return Buffer.from("hello"); };
+  const result = await shared.get(ROOT + "/note.txt", temp);
+  assert.equal(result.size, 5);
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].startsWith("https://d.pcs.baidu.com/file/test"), true);
+  assert.equal(seen[0].includes("http://"), false);
+});
+
+test("shared download still refuses an http dlink on a non-Baidu host", async () => {
+  responder = () => ({ errno: 0, info: [{ fs_id: "789", path: ROOT + "/note.txt", isdir: 0, size: 5, dlink: "http://evil.example/file" }] });
+  http.curlRange = async () => Buffer.from("hello");
+  await assert.rejects(shared.get(ROOT + "/note.txt", temp), /非百度 PCS/);
+});
+
+// 所有者路径向上查找共享祖先目录时，若每层都单查 filemetas + member/list，
+// 100 层路径会产生 129 次请求。批量取元信息后，请求数大幅下降。
+test("shared owner lookup batches ancestor metadata instead of one request per level", async () => {
+  const deep = "/资料" + "/子目录".repeat(40);
+  responder = (url) => {
+    if (url.pathname === "/api/filemetas") {
+      const paths = JSON.parse(url.searchParams.get("target"));
+      return { errno: 0, info: paths.map(p => ({ path: p, fs_id: "456", isdir: 1 })) };
+    }
+    if (url.pathname === "/sharedir/member/list") return { errno: 18210, errmsg: "未共享" };
+    return fixture(url, {});
+  };
+  await assert.rejects(shared.ls(deep), /已向上查找 64 层/);
+  const metaCalls = calls.filter(c => c.url.pathname === "/api/filemetas");
+  // 64 层祖先链 → 批量后应是 2 次（每批 32 条），而不是 64 次。
+  assert.equal(metaCalls.length, 2, "祖先链元信息应批量查询");
+  // 每层仍需一次 member/list 探针，但总请求数不再随深度线性翻倍于 filemetas。
+  assert.ok(calls.length < 64 + 64, "总请求数应显著低于逐层查询，实际 " + calls.length);
 });
 
 test("CLI shared requires confirmation before invoking a write operation", () => {
