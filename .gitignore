@@ -9,3 +9,7 @@ BaiduPCS-Go-v*/
 
 # 引擎在当前工作目录下生成的下载缓存（运行 BaiduPCS-Go 时产生）
 Downloads/
+
+# 合并冲突处理时留下的临时文件（commands.md 副本 / patch）
+_*.tmp
+_p.patch
