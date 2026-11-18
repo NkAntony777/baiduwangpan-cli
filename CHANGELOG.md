@@ -15,11 +15,16 @@
 - **`--pwd` 取值校验会影响所有使用 `--pwd` 的命令**（含既有的 `bdp share set`）：
   此前 `--pwd` 会静默吞掉下一个参数（如 `--json`），现在取值缺失、为空或以 `-`
   开头都会直接报「选项取值非法」。这是行为变化，既有脚本需留意。
-- 补充参数、确认、CLI JSON 和假引擎端到端测试。测试总数 444 → **465**。
+- 补充参数、确认、CLI JSON 和假引擎端到端测试。测试总数 444 → **466**。
   计数口径为**用例声明数**（与 `test/doc-contract.test.js` 的核对方式一致）；
   其中 5 项依赖可执行假引擎，**仅在 Linux/macOS 执行**，Windows 上被 skip
-  （非 Windows 实测 465 passed）。
+  （非 Windows 实测 466 passed）。
 - 重建 `baiduwangpan-skill.zip`（42,596 字节 / 8 个文件）。
+- 修复 Linux 扫码登录无法发现只提供 `microsoft-edge-stable` 的 Edge 安装；同时识别 beta/dev 通道的命令名。
+- 浏览器检测回归测试使用隔离的 PATH，不依赖本机浏览器或手动软链接。测试总数 444 → **445**。
+  计数口径为**用例声明数**（与 `test/doc-contract.test.js` 的核对方式一致）；新增用例依赖 POSIX
+  `command -v`，**仅在 Linux 执行**，Windows/macOS 上被 skip（非 Linux 实测 444 passed + 1 skipped）。
+- 浏览器 Skill 内容未变化。
 
 ## v1.11.3 — 2026-11-02
 
