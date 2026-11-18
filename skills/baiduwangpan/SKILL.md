@@ -1,7 +1,7 @@
 ---
 name: baiduwangpan
 description: 百度网盘 CLI 操作技能 — 基于 baiduwangpan-cli (bdp) 命令，支持全盘文件浏览/搜索/免下载读取内容/上传下载/群聊文件浏览。当用户要求查看、搜索、读取、上传、下载百度网盘文件，或浏览百度网盘群聊文件时使用。
-version: 1.11.3
+version: 1.12.1
 authors:
   - NkAntony777
 credentials:
@@ -75,7 +75,7 @@ bdp login --bduss <BDUSS值> --stoken <STOKEN值>
 npm install -g baiduwangpan-cli
 ```
 
-安装时自动下载 BaiduPCS-Go 引擎（镜像优先加速，国内也能装）。引擎丢失时 CLI 会自动发现包目录内版本子目录（如 `BaiduPCS-Go-v4.0.1-windows-x64/`）中的二进制，config 里失效的绝对 `pcsPath` 自动回退，无需手改配置。之后配置凭证：
+安装时自动下载 BaiduPCS-Go 引擎（镜像优先加速，国内也能装）。引擎丢失时 CLI 会自动发现包目录内版本子目录（如 `BaiduPCS-Go-v4.0.2-windows-x64/`）中的二进制，config 里失效的绝对 `pcsPath` 自动回退，无需手改配置。之后配置凭证：
 
 ```bash
 bdp login --bduss <BDUSS值> --stoken <STOKEN值>

@@ -38,7 +38,7 @@ test("setAuth replaces all transport-specific authentication state", () => {
 test("findPCS discovers binary inside versioned subdirectory", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "bdp-pcs-dir-"));
   try {
-    const sub = path.join(dir, "BaiduPCS-Go-v4.0.1-windows-x64");
+    const sub = path.join(dir, "BaiduPCS-Go-v4.0.2-windows-x64");
     fs.mkdirSync(sub);
     const exe = path.join(sub, "BaiduPCS-Go.exe");
     fs.writeFileSync(exe, "dummy");

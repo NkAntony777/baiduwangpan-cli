@@ -81,6 +81,27 @@ bdp whoami
 - 非 SVIP 账号受百度限速策略影响，速度慢是正常的
 - 大文件上传/下载失败可重试
 
+## 分享转存报「请确认登录参数中已经包含了网盘STOKEN」
+
+**这多半不是你的 STOKEN 过期了。** 引擎 BaiduPCS-Go v4.0.1 有上游缺陷
+[#534](https://github.com/qjfoidnh/BaiduPCS-Go/issues/534)：它用 Chrome/76 UA 请求分享页，
+百度反爬会把这种请求弹到一个**不含 `loginstate`** 的登录页，于是引擎判定「没有 STOKEN」并报出上面这句。
+
+实测（同一账号、同一分享链接、同一目标目录）：
+
+| 引擎 | 结果 |
+|---|---|
+| v4.0.1 | `分享链接转存到网盘失败: 请确认登录参数中已经包含了网盘STOKEN` |
+| v4.0.2 | `分享链接转存到网盘成功, 保存了<文件名>到当前目录` |
+
+v1.12.1 起 CLI 会在转存**之前**检查引擎版本，旧引擎直接拦下并提示升级。升级方式：
+
+```bash
+npm i -g baiduwangpan-cli   # postinstall 会自动下载 v4.0.2+ 引擎
+```
+
+若你用的是自带的旧引擎二进制，也可以直接把它替换成 v4.0.2+（文件名仍为 `BaiduPCS-Go.exe`）。
+
 ## 引擎未自动下载
 
 postinstall 会尝试多个 GitHub 镜像下载 BaiduPCS-Go，若全部失败：
@@ -90,7 +111,7 @@ postinstall 会尝试多个 GitHub 镜像下载 BaiduPCS-Go，若全部失败：
 3. 或者设置环境变量 `BAIDUPCS_CMD` 指向二进制路径
 4. 或者确保 `BaiduPCS-Go` 在系统 PATH 中
 
-> v1.1.1+ 会自动发现包目录内版本子目录（如 `BaiduPCS-Go-v4.0.1-windows-x64/BaiduPCS-Go.exe`）中的二进制；config 里失效的绝对 `pcsPath` 会自动回退到自动发现，无需手改 `~/.bdp/config.json`
+> v1.1.1+ 会自动发现包目录内版本子目录（如 `BaiduPCS-Go-v4.0.2-windows-x64/BaiduPCS-Go.exe`）中的二进制；config 里失效的绝对 `pcsPath` 会自动回退到自动发现，无需手改 `~/.bdp/config.json`
 
 ## 命令失败但退出码是 0？（v1.7.0 已修复）
 

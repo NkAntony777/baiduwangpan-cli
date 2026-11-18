@@ -6,3 +6,6 @@ node_modules/
 BaiduPCS-Go-v*/
 
 .zcode/
+
+# 引擎在当前工作目录下生成的下载缓存（运行 BaiduPCS-Go 时产生）
+Downloads/

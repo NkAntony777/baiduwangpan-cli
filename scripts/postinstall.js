@@ -24,7 +24,7 @@ const { spawnSync, execSync } = require("child_process");
 
 const PKG_ROOT = path.join(__dirname, "..");
 const REPO = "qjfoidnh/BaiduPCS-Go";
-const VERSION = "v4.0.1";
+const VERSION = "v4.0.2";
 
 // GitHub 下载加速镜像（按优先级排列）：大陆网络优先镜像，GitHub 放最后兜底
 const MIRRORS = [
@@ -280,7 +280,7 @@ async function main() {
     console.warn(`  bdp: 请手动下载 ${assetName}（任一地址均可）:`);
     for (const m of MIRRORS) console.warn(`  bdp:   ${m(assetName)}`);
     console.warn(`  bdp: 解压后把 ${binName} 放到: ${PKG_ROOT}`);
-    console.warn("  bdp:   （或版本子目录，如 BaiduPCS-Go-v4.0.1-windows-x64/，CLI 会自动发现）");
+    console.warn("  bdp:   （或版本子目录，如 BaiduPCS-Go-v4.0.2-windows-x64/，CLI 会自动发现）");
     console.warn("  bdp: 也可直接确保 BaiduPCS-Go 在 PATH 中（包仍可正常使用）。");
     console.warn("");
     process.exit(0); // 不阻断 npm install
