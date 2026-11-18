@@ -61,6 +61,7 @@
 | 回收站 | `bdp recycle list/restore/clean` | 列出/还原/清空回收站 |
 | 离线下载 | `bdp offline add <url>` | 百度服务器代下 |
 | 分享管理 | `bdp share set/cancel` | 生成/取消分享链接 |
+| **个人共享文件夹** | `bdp shared create/list/ls/members/invite/remove/put/get/cancel` | 普通文件夹右键“共享”，成员加入后共同管理文件 |
 | 分享转存 | `bdp transfer <url> --pwd CODE --yes` | 登录后将整个分享转存到引擎当前网盘目录 |
 | **列出群组** | `bdp groups` | 所有群聊 + gid |
 | **群内分享库** | `bdp gshares <gid>` | 顶层分享目录 |
@@ -216,6 +217,10 @@ bdp offline list                 离线任务列表
 bdp share set <path> [--pwd P]   创建分享链接 [--combined 输出带密码链接]
 bdp share cancel <id>...         取消分享
 bdp share list                   列出分享 (受 BaiduPCS-Go v4.0.2 引擎 bug 限制)
+bdp shared list                  列出“共享给我的文件夹”
+bdp shared create <own-dir> --yes 将已有普通文件夹设为共享并生成邀请链接
+bdp shared put <local> <dir> --yes 上传到已共享目录（拥有者用真实路径，接收者用虚拟路径）
+bdp shared get <file> [-o dir]   下载共享文件（首版单文件上限 32MiB）
 bdp transfer <url> --pwd CODE    转存整个个人版分享（--yes 执行，--dry-run 仅展示计划）
 bdp profile list / use <name>    多账号 profile 管理
 bdp serve --mcp                 启动 MCP 服务器 (stdio) -- 23 个带 schema 的工具
@@ -256,8 +261,26 @@ bdp error --list [--json]       列出全部已知错误码
 
 ### 通用选项
 
-> 当前共 **40** 条 CLI 命令、**23** 个 MCP 工具、**13** 个内置错误码。
+> 当前共 **41** 条 CLI 命令、**23** 个 MCP 工具、**14** 个内置错误码。
 
+### 个人版共享文件夹（右键“共享”）
+
+```bash
+bdp mkdir /协作资料
+bdp shared create /协作资料 --yes --json
+bdp shared members /协作资料 --json
+bdp shared invite /协作资料 --yes --json
+bdp shared put ./note.txt /协作资料 --yes
+# 另一个账号接受邀请后，使用自己 shared list 返回的原始路径：
+bdp shared list --json
+bdp shared ls '/<share>123-456' --json
+bdp shared put ./note.txt '/<share>123-456' --yes
+bdp shared get '/<share>123-456/note.txt' -o ./downloads
+```
+
+该命令使用个人版 `/sharedir` 接口，对应“共享给我的文件夹”，不创建团队空间。拥有者使用自己的真实共享路径；接收者使用列表返回的 `/<share>拥有者UK-目录FID` 路径。成员通过邀请链接加入，`shared remove <own-dir> <uk> --yes` 移除授权但保留文件，`shared cancel <own-dir> --yes` 取消共享。首版不提供未确认存在的独立只读/编辑角色参数。
+
+写操作需要确认，`--dry-run` 不请求接口；下载也支持 dry-run。上传和下载当前只支持不超过 **32MiB 的单个文件**，已有同名文件不覆盖；没有目录递归、断点续传或 MCP 工具。推荐先用 `bdp login` 建立浏览器登录态。API 和限制的证据见 [个人共享文件夹实现记录](docs/rfcs/collaborative-folders.md)。
 `bdp transfer` 支持完整的 `/s/1...` 或 `/share/init?surl=...` 个人版链接，以及 URL 自带的 `?pwd=...`（显式 `--pwd` 优先）。需要先用 `bdp login` 登录引擎；提取码必须是四位字母数字（**本 CLI 的安全限制**：引擎 v4.0.2 只校验长度是否为 4），无提取码分享暂不支持。**引擎必须是 BaiduPCS-Go v4.0.2+**：v4.0.1 有上游缺陷 #534 —— 百度反爬会把分享页弹成不含 `loginstate` 的页面，引擎因而误报「请确认登录参数中已经包含了网盘STOKEN」（与你的 STOKEN 无关）。CLI 在转存前会检查引擎版本，过旧时直接给出升级指引。它保存整个分享到 **BaiduPCS-Go 当前网盘工作目录**，不修改该目录设置、不提供覆盖开关、不下载到本地；同名冲突和目录存在性由引擎处理。`--dry-run` 只校验参数并展示计划，不联网检查链接、提取码或登录态。首版仅提供 CLI，不包含企业版分享、匿名下载或 MCP 工具。
 
 ```
