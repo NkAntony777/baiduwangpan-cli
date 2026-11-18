@@ -1,7 +1,7 @@
 ---
 name: baiduwangpan
 description: 百度网盘 CLI 操作技能 — 基于 baiduwangpan-cli (bdp) 命令，支持全盘文件浏览/搜索/免下载读取内容/上传下载/群聊文件浏览。当用户要求查看、搜索、读取、上传、下载百度网盘文件，或浏览百度网盘群聊文件时使用。
-version: 1.13.0
+version: 1.14.0
 authors:
   - NkAntony777
 credentials:
@@ -142,7 +142,10 @@ bdp ask "甘草配伍" [--limit N]    # 检索网盘正文（不只搜文件名�
   同一份内容在不同路径返回值不同，不解密就无法正确识别重复。
 - `bdp index build` 首次较慢（要逐文件抽正文）。先用 `--include 中医,玄学` 限定范围，
   或 `--no-extract` 只索引文件名（秒级）。索引是增量的，重复 build 只更新变化文件。
-- `bdp ask` 依赖索引，未建索引会明确报错提示先跑 `bdp index build`。
+- `bdp ask` 依赖索引。索引状态分四档，**「输入降级」与「查了没有」必须分开**：
+  `complete`（新鲜）/ `stale`（过期，**结果照给**但带 `indexState` + `note` 说明来源已降级）/
+  `empty`（建过但没内容）/ `missing`（没建过）。后两档 `total` 是 `null` 而不是 `0`
+  —— `0` 是「查了没有」，`null` 是「没执行检索」。
 
 ### 群聊文件操作
 

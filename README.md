@@ -33,7 +33,9 @@
 - **🔐 凭证安全** — 配置存储在 `~/.bdp/config.json`，不写入代码或日志；`bdp config` 默认脱敏
 - **🧹 重复文件清理** — `bdp dedup` 先按 size 粗筛再按 md5 精算，自动破解百度的 md5 混淆
 - **👁️ 全类型预览** — `bdp preview` 抽取 PDF 文本层（中文 CID 字体可还原）、ZIP 中央目录、DOCX/XLSX 正文
-- **🔎 本地全文索引** — `bdp index` + `bdp ask`，中文二元分词 + SQLite FTS5，零外部依赖
+- **🔎 本地全文索引** — `bdp index` + `bdp ask`，中文二元分词 + SQLite FTS5，零外部依赖。
+  索引状态分四档并**与查询结果分开**：`complete` / `stale`（过期，结果照给但标明来源已降级）/
+  `empty` / `missing`（没得查，`total` 为 `null` 而不是 `0`）
 
 ## 📌 能力一览
 
