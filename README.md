@@ -144,22 +144,26 @@ bdp gls 539478953581833690 742474845517885
 bdp gdownload 539478953581833690 954615608563687 -o ./downloads
 ```
 
-## 🆕 v1.9.1 新增（v1.9.0 的四路审核修复）
+## 📜 版本沿革
 
-| 修复 | 说明 |
+历次版本的完整变更记录见 [CHANGELOG.md](CHANGELOG.md)。下面只列**至今仍然影响使用方式**的那些改动 —— 已经修好的历史 bug 不必占着 README 的篇幅。
+
+| 主题 | 说明 |
 |:-----|:-----|
-| **信封报实际账号** | `meta.profile` 此前报的是「请求的 profile」，多账号下恒为 `null`；现取实际激活的账号（MCP 侧同样） |
-| **失败路径也有信封** | `cat`/`head`/`tail`/`grep`/`login` 与顶层错误输出此前绕过信封 |
-| **错误码不再丢数值** | `"errno=31066"` 能命中条目却返回 `code: null` |
-| **缺参数不再污染网盘** | `bdp_mkdir {}` 曾会真的建出名为 `undefined` 的目录；现统一报 user-error |
-| **`--no-meta` 位置自由** | `bdp --no-meta ls` 此前报「未知命令」 |
-| **参数错误不再让你提 Issue** | 新增 `-32001 TOOL_ARGUMENT_ERROR`（`severity: user-error`） |
+| **统一响应信封** | 所有 `--json` 输出追加 `meta`（`command`/`version`/`profile`/`elapsedMs`），**只追加不改既有字段**；`--no-meta` 可关闭。返回**裸数组**的历史接口（`groups`/`gshares`/`--legacy-json`/`share cancel`）不加 |
+| **结构化错误码** | 错误码表抽到 `lib/error-codes.js`，CLI `bdp error --json` 与 MCP `bdp_error` 返回**同一份结构**；每条错误带 `severity`（`retryable`/`fatal`/`user-error`/`unknown`）与 `action`（建议的下一步） |
+| **结论与内部细节分层** | 每条错误码拆成 `description`（结论）与 `internalDetail`（实测记录/实现坑）。**默认只下发结论**；CLI `--verbose` / MCP `{"verbose":true}` 才给内部细节 |
+| **提示注入防线** | 所有返回值都清洗控制字符与 Unicode 格式字符，正文类字段包上 `<untrusted_file>…</untrusted_file>` 边界标记；错误消息同样净化并中和伪标记 |
+| **凭证默认脱敏** | `bdp config` / `bdp config --json` 默认对 BDUSS/STOKEN 脱敏（`"redacted": true`），仅 `--show-secrets` 才输出原值 |
+| **失败不再伪装成功** | 引擎失败时退出码可能仍是 0，因此成功与否**只看输出文本**：`ls`/`get`/`put` 失败统一以退出码 1 结束，JSON 带 `{"error","errno"}`；`rm`/`rename`/`share set` 未确认即成功同样被堵 |
+| **md5 反混淆** | 百度返回的 md5 是混淆值 —— 同一内容在不同路径返回值不同，不解密就无法去重。算法移植自 BaiduPCS-Go 源码 |
+| **编码自动识别** | UTF-8 / GBK / Big5 自动判别，中文古籍不再乱码，grep 不再静默漏检 |
+| **二进制守卫** | PDF/zip/图片/音视频不再被当文本读取，直接报错并提示改用 `bdp get` |
+| **Node 版本要求** | 需要 **>= 22.5**（`bdp index` / `bdp ask` 依赖内置 `node:sqlite`） |
 
-## 🆕 v1.10.0 新增（MCP 并发恢复）
+### 并发与事件循环
 
-| 改进 | 说明 |
-|:-----|:-----|
-| **并发不再等于串行** | 引擎调用此前用 `spawnSync`，一次 `ls /` 冻结事件循环 594ms —— MCP 单进程下所有并发请求全部排队（8 并发 4047ms，加速比 **1.0×**）。现改用异步 spawn，**输出逐字节不变** |
+引擎调用全部改为**异步 spawn**（此前 `spawnSync` 一次 `ls /` 冻结事件循环 594ms，MCP 单进程下所有并发请求全部排队，加速比只有 1.0×），**输出逐字节不变**。
 
 **并发基准**（实测；**同一台机器、同一网盘账号**；改前 = `spawnSync`，改后 = 异步 spawn）：
 
@@ -172,93 +176,7 @@ bdp gdownload 539478953581833690 954615608563687 -o ./downloads
 
 > 事件循环也不再被冻结：8 并发期间定时器触发 **52 次**（改前**单次**调用就是 0 次）。
 
-## 🆕 v1.9.2 新增（错误码分层）
-
-| 改进 | 说明 |
-|:-----|:-----|
-| **结论与内部细节分层** | 每条错误码拆成 `description`（结论）与 `internalDetail`（实测记录/实现坑）。**默认只下发结论**；CLI `--verbose` / MCP `{"verbose":true}` 才给内部细节 |
-| **全局开关位置自由** | `bdp --verbose error -3` 此前报「未知命令」；现 `--json`/`--verbose`/`--no-meta`/`--legacy-json` 均支持前置换 |
-
-## 🆕 v1.9.0 新增（统一响应信封 + 结构化错误码）
-
-| 改进 | 说明 |
-|:-----|:-----|
-| **统一响应信封** | 所有 `--json` 输出追加 `meta`（`command`/`version`/`profile`/`elapsedMs`），**只追加不改既有字段**；`--no-meta` 可关闭。返回**裸数组**的历史接口（`groups`/`gshares`/`--legacy-json`/`share cancel`）不加 |
-| **结构化错误码** | 错误码表抽到 `lib/error-codes.js`，CLI `bdp error --json` 与 MCP `bdp_error` 返回**同一份结构** |
-| **错误码可判断重试** | 每条错误带 `severity`（`retryable`/`fatal`/`user-error`/`unknown`）与 `action`（建议的下一步） |
-| **MCP 错误也结构化** | 工具失败返回 `{error:{code,name,message,severity,retryable,action}}`，`code` 永远是数值 |
-| **19 个 MCP 工具** | 新增 `bdp_error` |
-
-## 🆕 v1.8.5 新增（第二轮红队 + 性能剖析）
-
-| 修复 | 说明 |
-|:-----|:-----|
-| **群文件直下恢复** | `webJsonAsync` 此前把 POST 的 method/body 丢了 → native 传输下 `bdp gdownload` 自 v1.8.1 起一直是坏的 |
-| **中文不再乱码/漏检** | UTF-8 末尾被截断时按字节奇偶判断会误判成 GBK → `cat` 乱码、`grep` 搜中文返回 0 条 |
-| **`--dry-run` 不再真下载** | 目录路径的 dry-run 判定原本排在引擎回退之后 → 会把整个目录拉下来 |
-| **CLI 也有边界标记** | `--json` 通道的正文此前没有 `<untrusted_file>` 标记，而文档声称有 |
-| **rename 越权被堵** | 目标名 `..` 可绕过「只改文件名」→ 引擎归一化后变成跨目录移动 |
-| **合法文件名不再被改坏** | 净化曾删掉 ZWSP/ZWNJ/LRM 等合法排版字符 → 返回的路径再也找不到文件 |
-| **公开分享要确认** | `bdp share set` 创建对外可访问的链接，此前无任何闸门 |
-| **离线下载拒绝内网** | `bdp offline add` 可让百度服务器去取 `169.254.169.254` 等内网地址 |
-| **pcsPath 精确匹配** | 前缀匹配会让 `BaiduPCS-GoX.exe` 通过 → 重新打开任意 exe 启动器 |
-
-## 🆕 v1.8.4 新增（三路对抗性审核的修复）
-
-| 修复 | 说明 |
-|:-----|:-----|
-| **提示注入防线接线** | `sanitizeUntrusted` 此前是死代码 —— MCP 返回的正文裸奔。现所有返回值都清洗控制字符与 Unicode 格式字符，正文类字段包上 `<untrusted_file>…</untrusted_file>` 边界标记 |
-| **删除不再谎报成功** | 引擎退出码此前被忽略，引擎没真跑也报「✅ 已删除」。现按 BaiduPCS-Go 源码的成功标记判定，未确认即失败 |
-| **凭证不再被覆盖抹掉** | 配置损坏时 `config --set` 拒绝写入并告警；写入改为原子替换 |
-| **pcsPath 只认引擎** | `--set pcsPath` 只能指向文件名以 `BaiduPCS-Go` 开头的引擎 |
-| **rename 只改文件名** | MCP `bdp_rename` 目标含 `/` 会被拒绝，跨目录移动请用 `bdp_move` |
-| **回收站能列出文件** | md5 列的正则只认纯 hex，而百度返回混淆 md5 → 文件行被丢弃。现已放宽并反混淆 |
-| **offline --path 生效** | `bdp offline add --path <dir>` 的保存目录此前被静默丢弃 |
-| **体积上限按字节** | MCP HTTP 请求体 8MB 上限此前按 UTF-16 码元计，中文可放大 3 倍；超限现在真正返回 413 |
-| **recycle clean 要 --yes** | 与 `bdp rm` 一致的确认闸门 |
-| **扫描完整性自报** | `dedup`/`organize` 的输出带 `partial`/`scanPartial`/`scanFailedDirs`；此前目录扫描失败时那批文件会静默消失 |
-| **请求不再无限挂起** | native 传输此前没有超时且 worker 忙等，一次挂起即 100% CPU 死循环。现所有请求带超时，worker 改为事件唤醒 |
-| **MCP/CLI 深度对齐** | MCP `bdp_organize` 此前硬编码深度 6（CLI 是 12），同一目录少覆盖 41% 的文件 |
-
-> Node 版本要求已从 `>=14` 提升到 **>=22.5**（`bdp index` / `bdp ask` 依赖内置 `node:sqlite`）。
-
-## 🆕 v1.8.x 新增（内容深度能力）
-
-| 能力 | 命令 | 说明 |
-|:-----|:-----|:-----|
-| **md5 反混淆** | 自动 | 百度返回的 md5 是混淆值 —— 同一内容在不同路径返回值不同。不解密就无法去重。算法移植自 BaiduPCS-Go 源码，用真实网盘数据验证 9/9 |
-| **重复文件清理** | `bdp dedup /med` | 先 size 粗筛再 md5 精算，报告可释放空间；删除走回收站可恢复 |
-| **全类型预览** | `bdp preview /报告.pdf` | PDF 文本层（中文 CID 字体可还原）/ ZIP 中央目录 / DOCX / XLSX / EPUB / 图片尺寸 |
-| **本地全文索引** | `bdp index build /中医` | SQLite FTS5 + 中文二元分词，增量更新 |
-| **内容检索** | `bdp ask 甘草配伍` | 搜正文而非仅文件名 |
-| **内容整理** | `bdp organize /med --by type` | 按类型/年份/来源归类；同名目标自动加序号去重 |
-| **配置项写入** | `bdp config --set webTransport native` | 白名单 + 值校验；凭证类字段仍走 `bdp login` |
-| **Agent 写操作** | MCP `bdp_move`/`bdp_rename`/`bdp_remove` | Agent 能自主整理；remove 需显式 confirm，rename 默认 dry-run |
-| **MCP over HTTP** | `bdp serve --mcp --http` | 独立进程/远程 agent 接入；默认仅绑 127.0.0.1 + Bearer 令牌 |
-
-> **v1.8.1 起并发真正生效**：`--concurrency` 此前形同虚设（worker 池退出条件错误 + `spawnSync` 阻塞事件循环），
-> 实测 dedup 扫描提速 **19.4×**、index 全量构建提速 **9.2×**（结果完全一致）。
-
-
-## 🆕 v1.7.0 新增
-
-| 改进 | 说明 |
-|:-----|:-----|
-| **凭证不再泄漏** | `bdp config --json` 此前会明文吐出完整 BDUSS/STOKEN（而 SKILL.md 要求 Agent 优先用 `--json`）。现已默认脱敏，JSON 带 `"redacted": true` |
-| **失败不再伪装成功** | `ls`/`get`/`put` 失败时退出码曾为 0（`get` 还会把失败报成"下载完成 0B"）。现统一以退出码 1 结束，JSON 带 `{"error","errno"}` |
-| **GBK 中文古籍修复** | 编码检测的 GBK 回退分支曾是死代码（`Buffer.toString("utf-8")` 永不抛错），导致 75% 字符乱码、grep 静默返回空。现自动识别 UTF-8/GBK/Big5 |
-| **ls/search 结构化** | `--json` 从"塞一段文本表格"改为真正的 `entries[]`（index/name/path/isDir/size/mtime） |
-| **search 分页** | 新增 `--limit`/`--page`/`--max-results`/`--fields`；输出含 `total`/`hasMore`/`nextPage`，避免一次搜索吃掉 13 万 tokens |
-| **二进制守卫** | PDF/zip/图片/音视频不再被当文本读取，直接报错并提示改用 `bdp get` |
-| **du 完整性** | `capped`/`partial` 沿路径向上传播，不再出现"capped:false 但 size 不完整"；新增 `--progress`、`depthLimit`、`depthCapped` |
-| **share list 可用** | 改走网页 API，绕过引擎 panic bug |
-| **rm 批量 + 确认** | 支持多路径删除、`--yes`、结构化输出 |
-| **mkdir 幂等** | 目录已存在不再报失败 |
-| **gls nextPage** | 补上 SKILL.md 一直引用却不存在的翻页字段 |
-| **error -3 可用** | 负数错误码此前无法执行（`bdp error -- -3` 现在也支持） |
-| **MCP 服务器** | `bdp serve --mcp [--http]` 暴露 23 个带 JSON Schema 的工具（含移动/重命名/删除，Agent 可自主整理） |
-
-> v1.6.0 及更早版本的行为差异详见 [CHANGELOG.md](CHANGELOG.md)。
+> v1.9.2 及更早版本的完整变更记录见 [docs/CHANGELOG-archive.md](docs/CHANGELOG-archive.md)。
 
 ## 📖 完整命令参考
 
