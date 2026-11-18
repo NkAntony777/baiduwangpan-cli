@@ -8,6 +8,8 @@
 
 - 修复 Linux 扫码登录无法发现只提供 `microsoft-edge-stable` 的 Edge 安装；同时识别 beta/dev 通道的命令名。
 - 浏览器检测回归测试使用隔离的 PATH，不依赖本机浏览器或手动软链接。测试总数 444 → **445**。
+  计数口径为**用例声明数**（与 `test/doc-contract.test.js` 的核对方式一致）；新增用例依赖 POSIX
+  `command -v`，**仅在 Linux 执行**，Windows/macOS 上被 skip（非 Linux 实测 444 passed + 1 skipped）。
 - Skill 内容未变化；`baiduwangpan-skill.zip` 仍为 40,873 字节。
 
 ## v1.11.3 — 2026-11-02
