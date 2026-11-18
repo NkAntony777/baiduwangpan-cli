@@ -219,7 +219,7 @@ bdp organize [path] --by type --apply --yes   # 执行（真实移动网盘文�
 v1.9.0 起，每条命令的 `--json` 输出都会**追加**一个 `meta` 字段（只追加，不改任何既有字段）：
 
 ```json
-"meta": { "command": "ls", "version": "1.13.0", "profile": null, "elapsedMs": 42 }
+"meta": { "command": "ls", "version": "1.14.0", "profile": null, "elapsedMs": 42 }
 ```
 
 | 字段 | 含义 |
@@ -416,6 +416,22 @@ bdp ask <查询> [--limit N] [-p dir] [--ext ext]
 - 索引默认存 `~/.bdp/index/default.db`
 - `--no-extract` 只索引文件名与路径（秒级完成，搜不到正文但能搜到文件）
 - `--include` / `--exclude` 按路径关键词限定范围（建议先用它缩小范围）
+
+**索引健康状态与查询结果分开看**（v1.14.0）—— 「输入降级」不等于「查了没有」：
+
+| `indexState` | 含义 | `total` |
+|:-----|:-----|:-----|
+| `complete` | 索引新鲜（7 天内），结果可直接当作当前网盘的答案 | 命中数 |
+| `stale` | 索引已过期，**结果仍然给出**（命中是真的），但网盘此后的变动未包含在内 | 命中数 |
+| `empty` | 索引建过，但一条内容都没入库（网盘为空或全被过滤）—— **没得查** | `null` |
+| `missing` | 压根没建过索引 —— **没得查** | `null` |
+
+- `stale` 时结果里额外带 `indexAgeHours` 与 `note`（说明来源已降级、建议重建索引）。
+  **过期不会把结论抹掉** —— 命中是真的，只是来源不完整。
+- `empty` / `missing` 时 `total` 是 `null` 而不是 `0`：`0` 意味着「查了，没有」，
+  `null` 意味着「没执行检索」。两者必须分开，Agent 才能判断该不该重试。
+- 新鲜度以「最近一次 `bdp index build` 的时刻」为准，不是行级时间戳；
+  「7 天」这个阈值由 `lib/index-store.js` 单点定义，`bdp doctor` 与 `bdp ask` 同一口径。
 
 ```bash
 bdp index build /中医 --include 中医
@@ -632,7 +648,7 @@ bdp error --list --json     # 列出全部已知错误码
   "error": "文件或目录不存在",
   "errno": 31066,
   "errorCode": { "code": 31066, "name": "FILE_NOT_FOUND", "severity": "user-error", "retryable": false, "action": "…" },
-  "meta": { "command": "ls", "version": "1.13.0", "profile": null, "elapsedMs": 12 }
+  "meta": { "command": "ls", "version": "1.14.0", "profile": null, "elapsedMs": 12 }
 }
 ```
 

@@ -1887,11 +1887,25 @@ cmds.ask = async (args, json) => {
   }
   const handle = store.openIndex(args.flags.db);
   try {
-    const st = store.status(handle);
-    if (!st.files) {
-      const msg = '索引为空，请先运行: bdp index build';
-      if (json || args.flags.jsonFile) emitJson({ error: msg }, args);
-      else console.error('[ERROR] ' + msg);
+    // 索引健康状态与查询结果**分开**建模：
+    //   missing / empty → 没得查（输入降级），不是「查了没有」
+    //   stale          → 查得了，但来源已降级 —— 结果照给，必须标出来
+    const health = store.indexHealth(handle);
+    if (health.state === 'missing' || health.state === 'empty') {
+      const msg = health.state === 'missing'
+        ? '索引尚未建立，请先运行: bdp index build'
+        : '索引已建立但没有可检索的内容（网盘为空或全部被过滤），请先运行: bdp index build';
+      if (json || args.flags.jsonFile) {
+        emitJson({
+          error: msg,
+          query,
+          indexState: health.state,
+          indexFiles: health.files,
+          total: null,
+          hits: [],
+          note: '本次没有执行检索：' + msg,
+        }, args);
+      } else console.error('[ERROR] ' + msg);
       return 1;
     }
     const hits = store.search(handle, query, {
@@ -1899,18 +1913,36 @@ cmds.ask = async (args, json) => {
       dirPrefix: args.flags.p,
       ext: args.flags.ext,
     });
+    // 过期索引：结论仍然成立，但必须说明来源已降级 ——
+    // 不能把旧索引的结果说成「当前网盘的完整答案」。
+    const note = health.state === 'stale'
+      ? '索引已超过 ' + Math.round(health.maxAgeMs / 86400000) + ' 天（最后索引于 '
+        + (health.ageHours === null ? '未知时间' : health.ageHours + ' 小时前')
+        + '），结果来自过期索引，网盘此后的变动未包含在内；请重新运行 bdp index build。'
+      : undefined;
     if (json || args.flags.jsonFile) {
       const markedHits = hits.map((h) => (h && typeof h.snippet === "string"
         ? { ...h, snippet: markUntrusted(h.snippet) }
         : h));
-      emitJson({ query, total: hits.length, indexFiles: st.files, hits: markedHits }, args);
+      const payload = {
+        query,
+        total: hits.length,
+        indexFiles: health.files,
+        indexState: health.state,
+        indexAgeHours: health.ageHours,
+        hits: markedHits,
+      };
+      if (note) payload.note = note;
+      emitJson(payload, args);
       return;
     }
     if (!hits.length) {
-      console.log('未找到匹配内容（已索引 ' + st.files + ' 个文件）');
+      console.log('未找到匹配内容（已索引 ' + health.files + ' 个文件）');
+      if (note) console.log('  ⚠️ ' + note);
       return;
     }
-    console.log('查询「' + query + '」→ ' + hits.length + ' 条结果（索引 ' + st.files + ' 个文件）');
+    console.log('查询「' + query + '」→ ' + hits.length + ' 条结果（索引 ' + health.files + ' 个文件）');
+    if (note) console.log('  ⚠️ ' + note);
     console.log('');
     hits.forEach((h, i) => {
       console.log('  [' + (i + 1) + '] ' + sanitizeControl(h.path));
