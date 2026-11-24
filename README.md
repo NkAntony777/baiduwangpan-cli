@@ -506,7 +506,7 @@ bdp groups                          bdp gshares <gid>
 
 | 位置 | 角色 |
 | --- | --- |
-| `D:\coding\my-project\baiduwangpan-cli` | **源仓（唯一来源）** —— 所有改动落这里 |
+| `<repo>`（本仓根） | **源仓（唯一来源）** —— 所有改动落这里 |
 | `%APPDATA%\npm\node_modules\baiduwangpan-cli` | npm 全局安装副本 |
 
 **流程**：改源仓 → 跑一次同步脚本 → 全局副本即最新。

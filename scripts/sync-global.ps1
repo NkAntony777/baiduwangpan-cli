@@ -28,9 +28,10 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-# ── 字面量绝对路径（唯一来源 = 源仓）──────────────────────────────────
-$SourceRoot = 'D:\coding\my-project\baiduwangpan-cli'
-$GlobalRoot = 'C:\Users\16439\AppData\Roaming\npm\node_modules\baiduwangpan-cli'
+# ── 路径解析（不写死本机路径，便于公开仓与跨机使用）────────────────────
+#    源仓 = 本脚本所在目录的上一级；全局副本 = %APPDATA%\npm\node_modules\baiduwangpan-cli
+$SourceRoot = (Split-Path -Parent $PSScriptRoot)
+$GlobalRoot = (Join-Path $env:APPDATA 'npm\node_modules\baiduwangpan-cli')
 
 # ── 本次改动涉及的文件（源仓相对路径）────────────────────────────────
 #    只同步这些；全局副本的其它差异一律不碰（先在报告里列出来）。

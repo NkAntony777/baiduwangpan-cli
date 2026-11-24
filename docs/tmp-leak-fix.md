@@ -8,7 +8,7 @@
 | 项 | 事实 |
 | --- | --- |
 | 泄漏源 | `test/pan.test.js` → `tmpDir()`（16 个调用点）+ `TMP_CFG`（L11 配置目录） |
-| 落点 | `C:\Users\16439\AppData\Local\Temp\bdp-pan-out-*` / `bdp-pan-cfg-*`（**系统 TEMP = C 盘**） |
+| 落点 | `%TEMP%\bdp-pan-out-*` / `bdp-pan-cfg-*`（**系统 TEMP = C 盘**） |
 | 为什么一个都没清掉 | **压根没写清理逻辑** —— 不是「异常路径没走 finally」，是**没有 finally、没有 teardown、没有 rm** |
 | 每个目录装了什么 | 一份 `报告.pdf` 下载夹具（部分用例是 40 MB 大文件夹具） |
 | 每次全量泄漏多少 | **实测 16 个目录 / 125.8 MB**（15 个 `bdp-pan-out-*` + 1 个 `bdp-pan-cfg-*`） |
@@ -18,10 +18,10 @@
 
 此前（玄学起盘 CLI `docs/034`、slatesync 的泄漏修复文档）都把 `bdp-pan-out-*` 记成
 「npm 全局安装的第三方包留下的，不是本仓产物」—— 因为当时只看到
-`C:\Users\16439\AppData\Roaming\npm\node_modules\baiduwangpan-cli\test\pan.test.js`。
+`%APPDATA%\npm\node_modules\baiduwangpan-cli\test\pan.test.js`。
 
 **但那个路径其实是指向本仓的 Junction**（`npm ls -g` 输出
-`baiduwangpan-cli@1.14.0 -> D:\coding\my-project\baiduwangpan-cli`，
+`baiduwangpan-cli@1.14.0 -> <源仓路径>`，
 `fsutil reparsepoint query` 返回 Mount Point，两侧文件集 576=576、哈希差异 0）。
 **源头就在本仓**，所以本轮把它堵掉了。
 
@@ -89,8 +89,8 @@ JS 侧信号处理器根本不会被调用 —— 这不是本仓代码的问题
 
 | 位置 | 角色 |
 | --- | --- |
-| `D:\coding\my-project\baiduwangpan-cli` | **源仓（唯一来源）** —— 所有改动落这里 |
-| `C:\Users\16439\AppData\Roaming\npm\node_modules\baiduwangpan-cli` | npm 全局安装副本 |
+| `<源仓路径>` | **源仓（唯一来源）** —— 所有改动落这里 |
+| `%APPDATA%\npm\node_modules\baiduwangpan-cli` | npm 全局安装副本 |
 
 **流程**：改源仓 → 跑一次同步脚本 → 全局副本即最新。
 
@@ -150,7 +150,7 @@ powershell -ExecutionPolicy Bypass -File scripts\sync-global.ps1
 
 | 项 | 结果 |
 | --- | --- |
-| 形态 | **Junction** → 指向源仓（`npm ls -g` 显示 `-> D:\coding\my-project\baiduwangpan-cli`） |
+| 形态 | **Junction** → 指向源仓（`npm ls -g` 显示 `-> <源仓路径>`） |
 | 文件集差异 | src 576 / dst 576，onlySrc **0** / onlyDst **0** |
 | 哈希差异 | **0** 个文件不一致 |
 | 副本内跑测 | `node --test <global>\test\pan.test.js` → tests 18 / pass 18 / fail 0，C 盘 TEMP 差值 **0** |
