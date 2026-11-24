@@ -500,6 +500,25 @@ bdp groups                          bdp gshares <gid>
 - 群文件路径可能含**非法百分号编码**（裸 `%`），直接 `decodeURIComponent` 会抛 `URIError` 报废整个目录 → 已改为安全解码。
 - `gsearch`/`gtree`/`gshares` 默认启用**磁盘会话缓存**（目录 30min / 分享 5min，`~/.bdp/cache/`，`--no-cache` 关闭、`bdp cache clear` 清理）——重复搜索秒回，深扫续扫收敛。
 
+## 🏠 源仓是唯一来源
+
+本仓同时存在于两处：
+
+| 位置 | 角色 |
+| --- | --- |
+| `D:\coding\my-project\baiduwangpan-cli` | **源仓（唯一来源）** —— 所有改动落这里 |
+| `%APPDATA%\npm\node_modules\baiduwangpan-cli` | npm 全局安装副本 |
+
+**流程**：改源仓 → 跑一次同步脚本 → 全局副本即最新。
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\sync-global.ps1
+```
+
+- 脚本**字面量绝对路径**、可**重复运行**（幂等）、可**自检**（逐文件 SHA256 比对，不一致就报告而不是静默跳过）。加 `-CheckOnly` 只自检不复制。
+- **不联网、不 `npm install` / `npm update`** —— 只做逐文件复制。
+- **为什么需要它**：`npm update` / 重装会**覆盖**全局副本里的补丁。本仓的修复（例如测试临时目录不再漏，见 [docs/tmp-leak-fix.md](docs/tmp-leak-fix.md)）都住在源仓里，全局副本随时可能被重装冲掉 ⇒ 每次重装后跑一次本脚本即可恢复。
+
 ## 📁 项目结构
 
 ```

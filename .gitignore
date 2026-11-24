@@ -7,6 +7,9 @@ BaiduPCS-Go-v*/
 
 .zcode/
 
+# 测试临时工作目录（落仓内 .tmp/，不落系统 TEMP —— 见 docs/tmp-leak-fix.md）
+.tmp/
+
 # 引擎在当前工作目录下生成的下载缓存（运行 BaiduPCS-Go 时产生）
 Downloads/
 

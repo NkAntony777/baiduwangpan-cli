@@ -1,14 +1,23 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("fs");
-const os = require("os");
 const path = require("path");
 const crypto = require("crypto");
 const { EventEmitter } = require("events");
 const { PassThrough } = require("stream");
 
+// ── 临时目录纪律（2026-11-24 修，见 docs/tmp-leak-fix.md）──
+// 本文件此前把 16 处下载夹具目录与 1 处配置目录建在 **系统 TEMP（C 盘）** 且
+// **从不清理**（实测一次全量测试泄漏 16 个目录 / 125 MB，历史累计 887 个 / 7.383 GB）。
+// 现在：一律落**本仓 .tmp/**（D 盘），登记在册，由 tmp-helper 的四道钩子必删
+// （afterEach / after / process exit / SIGINT·SIGTERM·SIGHUP），
+// 并在进程启动时清扫超过 6h 的旧残留（append-only 台账）。
+// require 即生效：装四道钩子 + 进程启动清扫（见 tmp-helper.js）
+const { makeTempDir } = require("./tmp-helper");
+
 // ── 隔离配置：写入临时 BDP_CONFIG_DIR，避免触碰真实 ~/.bdp ──
-const TMP_CFG = fs.mkdtempSync(path.join(os.tmpdir(), "bdp-pan-cfg-"));
+// scope:"file" —— 这个配置目录整个测试文件共用，由 after 钩子删（不是 afterEach）。
+const TMP_CFG = makeTempDir("bdp-pan-cfg-", { scope: "file" });
 process.env.BDP_CONFIG_DIR = TMP_CFG;
 fs.writeFileSync(path.join(TMP_CFG, "config.json"), JSON.stringify({ ua: "test-ua", pcsPath: "BaiduPCS-Go" }), "utf-8");
 
@@ -119,8 +128,10 @@ function md5(buf) {
   return crypto.createHash("md5").update(buf).digest("hex");
 }
 
+// 16 个调用点的**唯一收口点**：目录落本仓 .tmp/（不落系统 TEMP），
+// 登记在册 → 用例跑完由 afterEach 钩子必删（断言失败/异常抛出同样会删）。
 function tmpDir() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), "bdp-pan-out-"));
+  return makeTempDir("bdp-pan-out-");
 }
 
 // 默认 web 元信息：/docs/报告.pdf → size 1000
