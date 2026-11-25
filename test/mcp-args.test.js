@@ -11,10 +11,10 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
-const os = require("node:os");
 const path = require("node:path");
+const { makeTempDir } = require("./tmp-helper");
 
-const TMP_CFG = fs.mkdtempSync(path.join(os.tmpdir(), "bdp-mcp-args-"));
+const TMP_CFG = makeTempDir("bdp-mcp-args-", { scope: "file" });
 process.env.BDP_CONFIG_DIR = TMP_CFG;
 fs.writeFileSync(
   path.join(TMP_CFG, "config.json"),

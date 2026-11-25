@@ -5,6 +5,7 @@ const nodeHttp = require("node:http");
 const libHttp = require("../lib/http");
 const { markUntrusted, sanitizeUntrusted } = require("../lib/sanitize");
 const { decodeTextWithEncoding } = require("../lib/pan");
+require("./tmp-helper");
 
 // ── 1. webJsonAsync 的 POST 必须真的带上 method 与 body ──
 // 回归自：webJsonAsync 构造了 init 却只传 headers → native 传输下所有 POST

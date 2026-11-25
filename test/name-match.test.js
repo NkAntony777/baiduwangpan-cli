@@ -1,6 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const { globToRegExp, matchesName, escapeRegExp } = require("../lib/name-match");
+require("./tmp-helper");
 
 // ── globToRegExp ────────────────────────────────────────
 

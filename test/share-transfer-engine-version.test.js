@@ -8,13 +8,13 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
-const os = require("node:os");
 const path = require("node:path");
 const { EventEmitter } = require("node:events");
 const { PassThrough } = require("node:stream");
+const { makeTempDir } = require("./tmp-helper");
 
 // ── 隔离配置：绝不碰真实 ~/.bdp ────────────────────────────────────────
-const dir = fs.mkdtempSync(path.join(os.tmpdir(), "bdp-engine-ver-"));
+const dir = makeTempDir("bdp-engine-ver-", { scope: "file" });
 process.env.BDP_CONFIG_DIR = dir;
 fs.writeFileSync(path.join(dir, "config.json"), JSON.stringify({ pcsPath: "BaiduPCS-Go" }), "utf8");
 

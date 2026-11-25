@@ -2,6 +2,7 @@ const pdf = require("../lib/pdf");
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const dedup = require("../lib/dedup");
+require("./tmp-helper");
 
 const FILE = (path, size, md5, obfuscated) => ({
   path,

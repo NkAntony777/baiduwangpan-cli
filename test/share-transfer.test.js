@@ -1,11 +1,11 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
-const os = require("node:os");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
+const { makeTempDir } = require("./tmp-helper");
 
-const dir = fs.mkdtempSync(path.join(os.tmpdir(), "bdp-share-transfer-"));
+const dir = makeTempDir("bdp-share-transfer-", { scope: "file" });
 const previousConfigDir = process.env.BDP_CONFIG_DIR;
 process.env.BDP_CONFIG_DIR = dir;
 const marker = path.join(dir, "calls.json");

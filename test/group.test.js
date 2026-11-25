@@ -1,11 +1,11 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("fs");
-const os = require("os");
 const path = require("path");
+const { makeTempDir } = require("./tmp-helper");
 
 // 缓存写入隔离到临时目录，避免污染真实 ~/.bdp/cache
-const TMP_CACHE = fs.mkdtempSync(path.join(os.tmpdir(), "bdp-cache-test-"));
+const TMP_CACHE = makeTempDir("bdp-cache-test-", { scope: "file" });
 process.env.BDP_CACHE_DIR = TMP_CACHE;
 
 // Mock http 模块（替换 require.cache）

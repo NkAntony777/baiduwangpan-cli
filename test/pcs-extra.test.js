@@ -1,11 +1,11 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("fs");
-const os = require("os");
 const path = require("path");
+const { makeTempDir } = require("./tmp-helper");
 
 // ── 隔离配置：写入临时 BDP_CONFIG_DIR，避免触碰真实 ~/.bdp ──
-const TMP_CFG = fs.mkdtempSync(path.join(os.tmpdir(), "bdp-pcsx-cfg-"));
+const TMP_CFG = makeTempDir("bdp-pcsx-cfg-", { scope: "file" });
 process.env.BDP_CONFIG_DIR = TMP_CFG;
 fs.writeFileSync(path.join(TMP_CFG, "config.json"), JSON.stringify({ ua: "test-ua", pcsPath: "BaiduPCS-Go" }), "utf-8");
 

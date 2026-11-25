@@ -20,14 +20,14 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
-const os = require("node:os");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
+const { makeTempDir } = require("./tmp-helper");
 
 const ROOT = path.join(__dirname, "..");
 const CLI = path.join(ROOT, "bin", "bdp.js");
 
-const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "bdp-closure-"));
+const tmpRoot = makeTempDir("bdp-closure-", { scope: "file" });
 test.after(() => fs.rmSync(tmpRoot, { recursive: true, force: true }));
 
 // ── 探针：跑在 CLI 之前（-r），记录同步子进程调用 + 退出时导出导入闭包 ──
@@ -113,7 +113,10 @@ test("运行时闭包：完全落在 lib/ + bin/ + node_modules 之内（契约 
       const rel = path.relative(ROOT, abs).split(path.sep).join("/");
       // package.json 是 Node 解析包入口（main/exports/type）时自己加载的，
       // 不是源码依赖 —— 闭包里出现它是正常的，不算越界。
-      const ok = rel.startsWith("lib/") || rel.startsWith("bin/") || rel === "package.json";
+      // 探针脚本本身（closure-probe.js）落在**本测试自己的临时目录**里 ——
+      // 临时目录现在在仓内 <repo>/.tmp/（不落系统 TEMP），它不是被测代码的依赖。
+      const ok = rel.startsWith("lib/") || rel.startsWith("bin/") || rel === "package.json" ||
+        abs.startsWith(path.resolve(tmpRoot) + path.sep);
       if (!ok) outside.push(rel);
     } else if (!abs.includes("node_modules" + path.sep)) {
       // 探针自己在仓库外（temp 目录），其余一律不该出现

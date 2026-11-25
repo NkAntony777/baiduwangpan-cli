@@ -3,6 +3,7 @@ const assert = require("node:assert/strict");
 const zip = require("../lib/zip");
 const pdf = require("../lib/pdf");
 const zlib = require("zlib");
+require("./tmp-helper");
 
 // ── 构造一个真实 ZIP ──────────────────────────────────────
 function makeZip(files) {

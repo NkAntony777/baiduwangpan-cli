@@ -1,6 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const { detectFileType, magicType, hasNul, extOf } = require("../lib/file-type");
+require("./tmp-helper");
 
 test("detectFileType: PDF 魔数 → pdf + binary", () => {
   const r = detectFileType(Buffer.from("%PDF-1.5\n%\xE2\xE3\xCF\xD3\n1 0 obj"), "报告.pdf");

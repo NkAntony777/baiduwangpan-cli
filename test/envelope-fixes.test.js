@@ -1,14 +1,14 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
-const os = require("node:os");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
+const { makeTempDir, TMP_ROOT: TMP_BASE } = require("./tmp-helper");
 
 const BDP_JS = path.join(__dirname, "..", "bin", "bdp.js");
 const VERSION = require("../package.json").version;
 
-const CFG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "bdp-envfix-cfg-"));
+const CFG_DIR = makeTempDir("bdp-envfix-cfg-", { scope: "file" });
 process.env.BDP_CONFIG_DIR = CFG_DIR;
 
 // 写一份「已激活 profile」的合成配置（隔离，不碰用户真实配置）
@@ -30,7 +30,7 @@ const mcp = require("../lib/mcp");
 
 test.after(() => {
   const resolved = path.resolve(CFG_DIR);
-  assert.ok(resolved.indexOf(path.resolve(os.tmpdir())) === 0);
+  assert.ok(resolved.indexOf(path.resolve(TMP_BASE)) === 0);
   fs.rmSync(resolved, { recursive: true, force: true });
 });
 
@@ -59,7 +59,7 @@ test("信封: meta.profile 反映实际激活的 profile（多账号下不能恒
 });
 
 test("信封: meta.profile 在无激活 profile 时为 null", () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "bdp-noprof-cfg-"));
+  const dir = makeTempDir("bdp-noprof-cfg-");
   try {
     fs.writeFileSync(path.join(dir, "config.json"), JSON.stringify({ ua: "u", pcsPath: "BaiduPCS-Go" }), "utf-8");
     const r = spawnSync(process.execPath, [BDP_JS, "whoami", "--json"], {

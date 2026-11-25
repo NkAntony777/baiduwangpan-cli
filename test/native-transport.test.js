@@ -7,15 +7,15 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
-const os = require("node:os");
 const path = require("node:path");
 const { EventEmitter } = require("node:events");
 const { PassThrough } = require("node:stream");
+const { makeTempDir } = require("./tmp-helper");
 
 const ROOT = path.join(__dirname, "..");
 
 // ── 隔离配置（默认 webTransport = native）────────────────────────────
-const TMP_CFG = fs.mkdtempSync(path.join(os.tmpdir(), "bdp-native-cfg-"));
+const TMP_CFG = makeTempDir("bdp-native-cfg-", { scope: "file" });
 process.env.BDP_CONFIG_DIR = TMP_CFG;
 fs.writeFileSync(
   path.join(TMP_CFG, "config.json"),

@@ -13,14 +13,14 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
-const os = require("node:os");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
 
 const CLI = path.join(__dirname, "..", "bin", "bdp.js");
 const store = require("../lib/index-store");
+const { makeTempDir } = require("./tmp-helper");
 
-const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "bdp-index-health-"));
+const tmpRoot = makeTempDir("bdp-index-health-", { scope: "file" });
 test.after(() => fs.rmSync(tmpRoot, { recursive: true, force: true }));
 
 let seq = 0;
@@ -103,7 +103,7 @@ test("indexHealth: 过期阈值只有一个事实来源（doctor 与 ask 同一�
 // ── CLI：bdp ask 的四档 ─────────────────────────────────────────────────
 
 function cliAsk(db, extra = []) {
-  const cfgDir = fs.mkdtempSync(path.join(os.tmpdir(), "bdp-ask-cfg-"));
+  const cfgDir = makeTempDir("bdp-ask-cfg-");
   fs.writeFileSync(path.join(cfgDir, "config.json"), JSON.stringify({ ua: "t", pcsPath: "BaiduPCS-Go" }), "utf8");
   const r = spawnSync(process.execPath, [CLI, "ask", "量子力学", "--db", db, "--json", ...extra], {
     encoding: "utf8",

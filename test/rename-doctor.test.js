@@ -1,9 +1,9 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
-const os = require("node:os");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
+const { makeTempDir } = require("./tmp-helper");
 
 const BDP_JS = path.join(__dirname, "..", "bin", "bdp.js");
 
@@ -35,7 +35,7 @@ test("bdp rename 默认 dry-run，目标含 / 或 .. 会被拒绝", () => {
 });
 
 test("bdp doctor --json 不泄漏本地路径，引擎文件无效时失败", () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "bdp-doctor-"));
+  const dir = makeTempDir("bdp-doctor-");
   const home = path.join(dir, "home");
   const pcs = path.join(dir, "BaiduPCS-Go.exe");
   fs.mkdirSync(home);

@@ -1,9 +1,9 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
-const os = require("node:os");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
+const { makeTempDir, TMP_ROOT: TMP_BASE } = require("./tmp-helper");
 
 const BDP_JS = path.join(__dirname, "..", "bin", "bdp.js");
 
@@ -39,13 +39,13 @@ test("sanitize: 载荷无法提前闭合 <untrusted_file> 边界标记", () => {
 // ══════════════════════════════════════════════════════════
 // 2. lib/config.js —— 白名单 / 值校验 / 原子写 / 损坏保护
 // ══════════════════════════════════════════════════════════
-const CFG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "bdp-audit-cfg-"));
+const CFG_DIR = makeTempDir("bdp-audit-cfg-", { scope: "file" });
 process.env.BDP_CONFIG_DIR = CFG_DIR;
 const config = require("../lib/config");
 
 test.after(() => {
   const resolved = path.resolve(CFG_DIR);
-  assert.ok(resolved.indexOf(path.resolve(os.tmpdir())) === 0);
+  assert.ok(resolved.indexOf(path.resolve(TMP_BASE)) === 0);
   fs.rmSync(resolved, { recursive: true, force: true });
 });
 
@@ -187,20 +187,20 @@ test("CLI: recycle clean 缺 --yes 时拒绝执行", () => {
 });
 
 test("CLI: 配置文件损坏时 bdp config 给出明确告警", () => {
-  const cfgDir = fs.mkdtempSync(path.join(os.tmpdir(), "bdp-audit-bad-cfg-"));
+  const cfgDir = makeTempDir("bdp-audit-bad-cfg-");
   try {
     fs.writeFileSync(path.join(cfgDir, "config.json"), '{"bduss":"x","stoken":"y"', "utf-8");
     const r = cliRun(cfgDir, cfgDir, ["config"]);
     assert.match(r.stderr, /已损坏/);
   } finally {
-    fs.rmSync(path.join(path.resolve(os.tmpdir()), path.basename(cfgDir)), { recursive: true, force: true });
+    fs.rmSync(path.join(path.resolve(TMP_BASE), path.basename(cfgDir)), { recursive: true, force: true });
   }
 });
 
 test("CLI: offline add --path 真的把保存目录传给引擎", () => {
   // 用一个假引擎：node.exe + 一个名为 offlinedl 的脚本，把收到的参数写进文件
-  const work = fs.mkdtempSync(path.join(os.tmpdir(), "bdp-audit-engine-"));
-  const cfgDir = fs.mkdtempSync(path.join(os.tmpdir(), "bdp-audit-cli-cfg-"));
+  const work = makeTempDir("bdp-audit-engine-");
+  const cfgDir = makeTempDir("bdp-audit-cli-cfg-");
   const argvFile = path.join(work, "argv.json");
   try {
     fs.writeFileSync(

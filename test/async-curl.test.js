@@ -1,6 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const http = require("../lib/http");
+require("./tmp-helper");
 
 test("spawnCollected: 等待子进程时事件循环不被冻住", async () => {
   let ticks = 0;

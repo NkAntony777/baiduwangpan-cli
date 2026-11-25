@@ -2,13 +2,13 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const { spawnSync } = require("child_process");
 const fs = require("fs");
-const os = require("os");
 const path = require("path");
+const { makeTempDir } = require("./tmp-helper");
 
 const BDP_JS = path.join(__dirname, "..", "bin", "bdp.js");
 
 // 隔离配置目录：避免触碰真实 ~/.bdp
-const TMP_CFG = fs.mkdtempSync(path.join(os.tmpdir(), "bdp-fixes-cfg-"));
+const TMP_CFG = makeTempDir("bdp-fixes-cfg-", { scope: "file" });
 fs.writeFileSync(
   path.join(TMP_CFG, "config.json"),
   JSON.stringify({

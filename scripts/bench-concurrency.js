@@ -19,8 +19,8 @@
  *   5. **多轮取最小值**：排除 GC/调度抖动。
  */
 const fs = require("node:fs");
-const os = require("node:os");
 const path = require("node:path");
+const scratch = require("../lib/scratch");
 const { EventEmitter } = require("node:events");
 const { PassThrough } = require("node:stream");
 
@@ -55,7 +55,9 @@ if (!LEVELS.length) LEVELS.push(1);
 // ── 环境：闸门抬到 16（否则测的是闸门，不是并发）─────────────────────
 const GATE = Math.max(16, Math.max.apply(null, LEVELS));
 process.env.BDP_MCP_MAX_CONCURRENCY = String(GATE);
-const TMP_CFG = fs.mkdtempSync(path.join(os.tmpdir(), "bdp-bench-"));
+// 压测隔离配置目录落**项目内 .tmp/**（D 盘），不落系统 TEMP（C 盘）——
+// 见 docs/tmp-leak-fix.md。退出时由下面的 process.once("exit") 清理。
+const TMP_CFG = scratch.makeScratchDir("bdp-bench-");
 process.env.BDP_CONFIG_DIR = TMP_CFG;
 fs.writeFileSync(
   path.join(TMP_CFG, "config.json"),

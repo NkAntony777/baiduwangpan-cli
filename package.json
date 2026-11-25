@@ -9,6 +9,7 @@
   "scripts": {
     "start": "node bin/bdp.js",
     "test": "node --test test/*.test.js",
+    "test:tmp-leak": "node scripts/tmp-leak-check.js",
     "bench:concurrency": "node scripts/bench-concurrency.js",
     "postinstall": "node scripts/postinstall.js"
   },

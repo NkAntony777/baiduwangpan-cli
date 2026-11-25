@@ -14,6 +14,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 const { markUntrustedRawFields, capErrorMessage, ERROR_MESSAGE_LIMIT, sanitizeErrorMessage } = require("../lib/sanitize");
+require("./tmp-helper");
 
 test("输出净化: raw 字段（含嵌套 / 数组内）都被包上 <untrusted_engine_output>", () => {
   const out = markUntrustedRawFields({

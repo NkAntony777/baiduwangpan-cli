@@ -1,6 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const { decryptMD5, isObfuscatedMD5 } = require("../lib/md5");
+require("./tmp-helper");
 
 // 全部样本取自真实网盘（2026-11 实测），并用引擎 meta 的真实 md5 交叉验证：
 //   /med/1.py                          → a44978fbdbb3cc266c89dc5f3477a3c1

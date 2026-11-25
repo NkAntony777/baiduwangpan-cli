@@ -8,9 +8,9 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
-const os = require("node:os");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
+const { makeTempDir } = require("./tmp-helper");
 
 const BDP_JS = path.join(__dirname, "..", "bin", "bdp.js");
 
@@ -40,7 +40,7 @@ test("时限: 非法/非正取值回落到默认值（不得变成 1ms 的病态
 //    异步路径本来就分别报告 stdout / stderr 通道（见 test/async-engine.test.js 的 T-03）。
 // ── 「只给 --profile 不给命令」不得建号 ────────────────────────────────
 test("CLI: 只给 --profile 不给命令 → 退出 1，且不建出/激活 profile", () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "bdp-prof-only-"));
+  const dir = makeTempDir("bdp-prof-only-");
   try {
     const r = spawnSync(process.execPath, [BDP_JS, "--profile", "x"], {
       encoding: "utf-8",

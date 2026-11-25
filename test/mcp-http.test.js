@@ -1,6 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const mcp = require("../lib/mcp");
+require("./tmp-helper");
 
 test("MCP: 写操作工具齐备（Agent 能自主整理）", () => {
   const names = mcp.toolDefs().map((t) => t.name);

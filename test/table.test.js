@@ -1,6 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const table = require("../lib/table");
+require("./tmp-helper");
 
 // BaiduPCS-Go v4.0.1 的 ls 真实输出（2026-11 实测）：
 // 表头是**居中**的，数据单元格按类型对齐（数字右对齐/字符串左对齐），
