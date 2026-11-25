@@ -1,13 +1,13 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
-const os = require("node:os");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
+const { makeTempDir, TMP_ROOT: TMP_BASE } = require("./tmp-helper");
 
 const BDP_JS = path.join(__dirname, "..", "bin", "bdp.js");
 
-const CFG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "bdp-sec-cfg-"));
+const CFG_DIR = makeTempDir("bdp-sec-cfg-", { scope: "file" });
 process.env.BDP_CONFIG_DIR = CFG_DIR;
 
 const config = require("../lib/config");
@@ -15,7 +15,7 @@ const { sanitizeControl } = require("../lib/sanitize");
 
 test.after(() => {
   const resolved = path.resolve(CFG_DIR);
-  assert.ok(resolved.indexOf(path.resolve(os.tmpdir())) === 0);
+  assert.ok(resolved.indexOf(path.resolve(TMP_BASE)) === 0);
   fs.rmSync(resolved, { recursive: true, force: true });
 });
 

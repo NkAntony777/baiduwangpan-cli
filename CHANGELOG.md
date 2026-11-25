@@ -4,6 +4,34 @@
 
 -----
 
+## 未发布 — 2026-11-25
+
+> 主题：**把测试临时目录泄漏从「只堵了 2 个前缀」扩到整个前缀族** ——
+> 全量跑完后，系统 TEMP 不再新增任何 `bdp-*` 目录。
+
+### 🔧 修复
+
+- **前缀族全收**：2026-11-24 只把 `test/pan.test.js` 收进仓内 `.tmp/`（2 个前缀），
+  其余 **33 个文件、43 个前缀**仍在 `os.tmpdir()`（C 盘）建目录，且**一个都没清理**
+  —— 实测单跑 `test/index-store.test.js`（21/21 通过）就净增 **11 个** `bdp-idx-*`。
+  现在全部落仓内 `<repo>/.tmp/`，由 `test/tmp-helper.js` 的四道钩子必删。
+- **产品代码与开发脚本也不再往系统 TEMP 写**：`lib/shared-folder.js` 的
+  `bdp-shared-upload-`（共享上传分块中转）与 `scripts/bench-concurrency.js` 的
+  `bdp-bench-`（压测隔离配置）改落 `lib/scratch.js` 统一解析的临时目录根（仓内 `.tmp/`）。
+- **启动清扫覆盖历史残留**：`sweepStaleTempDirs()` 现在**默认**同时扫仓内 `.tmp/`
+  与**系统 TEMP**里同前缀族、超过 6 小时的旧目录（`BDP_SWEEP_LEGACY_TEMP=0` 可关）；
+  append-only 对账台账（`sweep-ledger.jsonl` / `sweep-last.json`）保持不变。
+
+### 🧪 测试
+
+- 新增 `test/tmp-leak-guard.test.js`（5 项）：静态闸门（仓库里除白名单外不许再出现
+  `os.tmpdir()`）、前缀登记闸门、运行时闸门、仓内残留闸门，
+  外加一条默认关闭的端到端闸门。
+- 新增 `scripts/tmp-leak-check.js`（`npm run test:tmp-leak`）：跑前跑后各数一次，
+  断言全量跑完系统 TEMP 的 `bdp-*` **增量为 0**。
+- 测试总数 520 → **525**。
+- `baiduwangpan-skill.zip` 未变更（44,802 字节 / 8 个文件）。
+
 ## v1.14.0 — 2026-11-18
 
 > 主题：**把「输入降级」与「分析缺数据」分成两件事**，并把一条边界断言从

@@ -9,10 +9,10 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
-const os = require("node:os");
 const path = require("node:path");
+const { makeTempDir, TMP_ROOT: TMP_BASE } = require("./tmp-helper");
 
-const TMP_CFG = fs.mkdtempSync(path.join(os.tmpdir(), "bdp-audit1113-"));
+const TMP_CFG = makeTempDir("bdp-audit1113-", { scope: "file" });
 process.env.BDP_CONFIG_DIR = TMP_CFG;
 fs.writeFileSync(
   path.join(TMP_CFG, "config.json"),
@@ -42,7 +42,7 @@ const http = require("../lib/http");
 
 // doctor 相关用例要自带配置：每个用例写一份，避免互相污染
 function withConfig(obj) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "bdp-audit1113-cfg-"));
+  const dir = makeTempDir("bdp-audit1113-cfg-");
   fs.writeFileSync(path.join(dir, "config.json"), JSON.stringify(obj), "utf-8");
   process.env.BDP_CONFIG_DIR = dir;
   delete require.cache[require.resolve("../lib/config")];
@@ -154,7 +154,7 @@ test("审核1-M1: doctor 对「PATH 上的引擎」不再报假阴性（existsSy
 test("审核2-M3: doctor 暴露引擎来源；配置路径失效时的静默回退必须进 warnings", async () => {
   const dir = withConfig({
     ua: "x",
-    pcsPath: path.join(os.tmpdir(), "vfy-nope-" + Date.now(), "BaiduPCS-Go.exe"),
+    pcsPath: path.join(TMP_BASE, "vfy-nope-" + Date.now(), "BaiduPCS-Go.exe"),
   });
   try {
     const doctor = require("../lib/doctor");

@@ -1,6 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const pan = require("../lib/pan");
+require("./tmp-helper");
 
 // GBK 字节（"中文" = D6D0 CEC4）
 const GBK_ZHONGWEN = Buffer.from([0xd6, 0xd0, 0xce, 0xc4]);

@@ -1,16 +1,16 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
-const os = require("node:os");
 const path = require("node:path");
+const { makeTempDir, TMP_ROOT: TMP_BASE } = require("./tmp-helper");
 
-const configDir = fs.mkdtempSync(path.join(os.tmpdir(), "bdp-config-test-"));
+const configDir = makeTempDir("bdp-config-test-", { scope: "file" });
 process.env.BDP_CONFIG_DIR = configDir;
 const config = require("../lib/config");
 
 test.after(() => {
   const resolved = path.resolve(configDir);
-  assert.ok(resolved.startsWith(path.resolve(os.tmpdir()) + path.sep));
+  assert.ok(resolved.startsWith(path.resolve(TMP_BASE) + path.sep));
   fs.rmSync(resolved, { recursive: true, force: true });
 });
 
@@ -36,7 +36,7 @@ test("setAuth replaces all transport-specific authentication state", () => {
 });
 
 test("findPCS discovers binary inside versioned subdirectory", () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "bdp-pcs-dir-"));
+  const dir = makeTempDir("bdp-pcs-dir-");
   try {
     const sub = path.join(dir, "BaiduPCS-Go-v4.0.2-windows-x64");
     fs.mkdirSync(sub);
@@ -56,7 +56,7 @@ test("resolvePcsPath keeps a valid stored absolute path", () => {
 
 test("resolvePcsPath falls back to auto-discovery when stored absolute path is dead (1.1.0 upgrade loss)", () => {
   const auto = config.findPCS();
-  const dead = path.join(os.tmpdir(), "no-such-BaiduPCS-Go.exe");
+  const dead = path.join(TMP_BASE, "no-such-BaiduPCS-Go.exe");
   assert.equal(config.resolvePcsPath({ pcsPath: dead }), auto);
   // 裸命令名（PATH 查找）保持原样
   assert.equal(config.resolvePcsPath({ pcsPath: "BaiduPCS-Go" }), "BaiduPCS-Go");

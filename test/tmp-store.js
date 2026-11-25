@@ -13,6 +13,12 @@
  * 而且**从来没有删除逻辑** —— 不是「异常路径没走 finally」，是压根没写清理。
  * 于是每跑一次全量测试就再攒一批（实测 C 盘曾累计 887 个目录 / 7.383 GB）。
  *
+ * 2026-11-25 扩族：当时只堵了 pan.test.js 这**一个**文件 —— 实际全仓有
+ * **34 个文件、46 个 bdp-* 前缀**在往系统 TEMP 写且**一个都没清理**
+ * （含 1 个产品模块 lib/shared-folder.js 与 1 个开发脚本 scripts/bench-concurrency.js；
+ *  46 = 45 个在用前缀 + makeTempFile 的默认前缀 bdp-tmp-）。
+ * 现在整个前缀族都登记在 TMP_PREFIXES 里，全部落仓内 .tmp/ 并必删。
+ *
  * 设计取自玄学起盘 CLI 的 docs/034_测试临时目录泄漏修复.md 与
  * slatesync 的 docs/测试临时目录泄漏修复.md（同一套做法，不另发明）——
  * 本文件是那套做法在 CommonJS 仓（baiduwangpan-cli）里的等价实现。
@@ -22,22 +28,78 @@
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
+const scratch = require("../lib/scratch");
 
 /** 仓库根目录（本文件在 <repo>/test/ 下）。 */
 const REPO_ROOT = path.resolve(__dirname, "..");
 
-/** 临时工作目录根：**项目内**（D 盘），不是系统 TEMP（C 盘）。 */
-const TMP_ROOT = path.join(REPO_ROOT, ".tmp");
+/**
+ * 临时工作目录根：**项目内**（D 盘），不是系统 TEMP（C 盘）。
+ * 与产品侧 lib/scratch.js 的落点是同一个目录（单一事实来源）。
+ */
+const TMP_ROOT = scratch.repoScratchRoot();
 
 /** 过期临时目录判定阈值（小时）。 */
 const STALE_TMP_HOURS = 6;
 
 /**
- * 本仓已迁移到 .tmp/ 的临时目录前缀。
+ * 本仓全部临时目录前缀（**全族登记在册**，2026-11-25 扩族）。
+ *
  * 目录名保持与历史 C 盘残留同名 ⇒ 计数、清扫、判废口径与历史一致，
  * 同一把尺子量「跑前 / 跑后 / 差值」。
+ *
+ * 口径来源：**代码里实际用到的每一个 bdp-* 前缀**（扫全仓得出，
+ * docs/tmp-leak-fix.md §8.2 有逐条登记表）。
+ * 新增前缀必须同时改两处：这里 + docs 的登记表，否则 test/tmp-leak-guard.test.js 会红。
  */
-const TMP_PREFIXES = ["bdp-pan-out-", "bdp-pan-cfg-"];
+const TMP_PREFIXES = [
+  "bdp-ask-cfg-",
+  "bdp-async-cfg-",
+  "bdp-audit-bad-cfg-",
+  "bdp-audit-cfg-",
+  "bdp-audit-cli-cfg-",
+  "bdp-audit-engine-",
+  "bdp-audit1113-",
+  "bdp-audit1113-cfg-",
+  "bdp-bench-",
+  "bdp-browser-path-",
+  "bdp-cache-test-",
+  "bdp-closure-",
+  "bdp-conc-cfg-",
+  "bdp-concenv-cfg-",
+  "bdp-config-test-",
+  "bdp-contract-",
+  "bdp-corr-cfg-",
+  "bdp-doctor-",
+  "bdp-dryrun-",
+  "bdp-dryrun-cfg-",
+  "bdp-engine-ver-",
+  "bdp-env-cfg-",
+  "bdp-env-detail-",
+  "bdp-env-read-",
+  "bdp-env-v192-",
+  "bdp-envfix-cfg-",
+  "bdp-fixes-cfg-",
+  "bdp-flag-guard-",
+  "bdp-idx-",
+  "bdp-index-health-",
+  "bdp-mcp-args-",
+  "bdp-native-cfg-",
+  "bdp-noprof-cfg-",
+  "bdp-pan-cfg-",
+  "bdp-pan-out-",
+  "bdp-pcs-dir-",
+  "bdp-pcsx-cfg-",
+  "bdp-prof-guard-",
+  "bdp-prof-only-",
+  "bdp-redact-",
+  "bdp-rename-args-",
+  "bdp-sec-cfg-",
+  "bdp-share-transfer-",
+  "bdp-shared-test-",
+  "bdp-shared-upload-",
+  "bdp-tmp-",
+];
 
 /** 台账文件（append-only）与最近一次清扫摘要。 */
 const SWEEP_LEDGER = path.join(TMP_ROOT, "sweep-ledger.jsonl");
@@ -52,7 +114,11 @@ const live = new Set();
 
 let processHooksInstalled = false;
 
-/** 递归删目录；Windows 上被占用会 EPERM/EBUSY，故带重试。 */
+/**
+ * 递归删目录；Windows 上被占用会 EPERM/EBUSY，故带重试。
+ * 「已经不在了」也算成功 —— 多进程并发清扫时同一目录会被多个进程抢删，
+ * 谁先删到算谁的，后到的不能因此报失败（否则台账对不上账）。
+ */
 function removeTree(dir) {
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
@@ -62,7 +128,8 @@ function removeTree(dir) {
       /* 正在被别人删 / 被占用 → 再试一次 */
     }
   }
-  return false;
+  // 彻底删不掉时，若已不存在则视为成功（并发抢删）
+  return !fs.existsSync(dir);
 }
 
 /** 删单个文件（临时文件等）。 */
@@ -111,13 +178,26 @@ function appendSweepLedger(entry) {
   }
 }
 
-/** 最近一次清扫的摘要（覆盖写）。 */
+/**
+ * 最近一次清扫的摘要（覆盖写）。
+ * 先写临时文件再 rename —— 多个测试进程同时启动清扫时不会写出半截 JSON。
+ * Windows 上目标文件正被别的进程占用时 rename 会失败 ⇒ 退回直写，
+ * 并**清掉临时文件**（绝不在 .tmp/ 里留垃圾）。
+ */
 function writeSweepSummary(result) {
+  const body = JSON.stringify(Object.assign({}, result, { ts: new Date().toISOString() }), null, 2);
+  const tmp = SWEEP_SUMMARY + "." + process.pid + ".tmp";
   try {
     fs.mkdirSync(TMP_ROOT, { recursive: true });
-    fs.writeFileSync(SWEEP_SUMMARY, JSON.stringify(Object.assign({}, result, { ts: new Date().toISOString() }), null, 2), "utf8");
+    fs.writeFileSync(tmp, body, "utf8");
   } catch {
-    /* 同上 */
+    return;
+  }
+  try {
+    fs.renameSync(tmp, SWEEP_SUMMARY);
+  } catch {
+    try { fs.writeFileSync(SWEEP_SUMMARY, body, "utf8"); } catch {}
+    try { fs.rmSync(tmp, { force: true }); } catch {}
   }
 }
 
@@ -128,9 +208,14 @@ function matchesPrefix(name) {
 /**
  * 清扫过期临时目录：删掉超过 N 小时（默认 6h）的同类残留。
  *
- * 默认**只扫项目内 .tmp/**。历史 C 盘（os.tmpdir()）那批残留需显式开
- * BDP_SWEEP_LEGACY_TEMP=1 才动 —— 避免与并行清理任务抢删同一批目录、
- * 导致两边对不上账。
+ * **扫两处**（2026-11-25 起默认全开）：
+ *   ① 项目内 <repo>/.tmp/ —— 本仓的临时工作目录根；
+ *   ② 系统 TEMP（os.tmpdir()）—— **历史残留就在这儿**（实测 C 盘曾躺着
+ *      887 个目录 / 7.383 GB，以及后来累计的 123 个散目录）。
+ *      只扫仓内等于「欠账不还」：老目录永远躺在 C 盘上。
+ *      显式关闭：BDP_SWEEP_LEGACY_TEMP=0。
+ *
+ * 只删**超过阈值**的旧目录 —— 新鲜目录（正在被别的进程用）一律不碰。
  *
  * @param {{hours?:number, legacy?:boolean}} options
  */
@@ -140,7 +225,8 @@ function sweepStaleTempDirs(options) {
   const hours = Number(rawHours);
   const useHours = Number.isFinite(hours) && hours > 0 ? hours : STALE_TMP_HOURS;
   const cutoff = Date.now() - useHours * 3600_000;
-  const legacy = opts.legacy === true || process.env.BDP_SWEEP_LEGACY_TEMP === "1";
+  const legacyEnv = process.env.BDP_SWEEP_LEGACY_TEMP;
+  const legacy = opts.legacy === false ? false : opts.legacy === true ? true : legacyEnv !== "0";
   const roots = legacy ? [TMP_ROOT, os.tmpdir()] : [TMP_ROOT];
   const result = {
     removed: 0,
@@ -160,7 +246,9 @@ function sweepStaleTempDirs(options) {
       continue;
     }
     for (const entry of entries) {
-      if (!entry.isDirectory() || !matchesPrefix(entry.name)) continue;
+      if (!matchesPrefix(entry.name)) continue;
+      const isDir = entry.isDirectory();
+      if (!isDir && !entry.isFile()) continue;
       const full = path.join(root, entry.name);
       result.scanned += 1;
       let st;
@@ -174,9 +262,10 @@ function sweepStaleTempDirs(options) {
         continue;
       }
       const ageHours = Number(((Date.now() - st.mtimeMs) / 3600_000).toFixed(2));
-      if (removeTree(full)) {
+      const ok = isDir ? removeTree(full) : removeFile(full);
+      if (ok) {
         result.removed += 1;
-        appendSweepLedger({ ts: new Date().toISOString(), path: full, root: root, ageHours: ageHours });
+        appendSweepLedger({ ts: new Date().toISOString(), path: full, root: root, kind: isDir ? "dir" : "file", ageHours: ageHours });
       } else {
         result.failed += 1;
         /* 被占用 / 正在被别人删 → 留给下一轮 */

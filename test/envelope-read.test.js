@@ -3,10 +3,10 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
-const os = require("node:os");
 const path = require("node:path");
 const http = require("node:http");
 const { spawn } = require("node:child_process");
+const { makeTempDir } = require("./tmp-helper");
 
 const BDP_JS = path.join(__dirname, "..", "bin", "bdp.js");
 const VERSION = require("../package.json").version;
@@ -20,7 +20,7 @@ test("信封: cat/head/tail/grep --json 在假引擎下都带 meta", async () =>
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   const port = server.address().port;
-  const cfgDir = fs.mkdtempSync(path.join(os.tmpdir(), "bdp-env-read-"));
+  const cfgDir = makeTempDir("bdp-env-read-");
   fs.writeFileSync(
     path.join(cfgDir, "config.json"),
     JSON.stringify({

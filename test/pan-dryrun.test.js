@@ -1,14 +1,14 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
-const os = require("node:os");
 const path = require("node:path");
 const { EventEmitter } = require("node:events");
 const { PassThrough } = require("node:stream");
+const { makeTempDir } = require("./tmp-helper");
 
 // ── 隔离配置：本测试绝不能读用户的真实 ~/.bdp/config.json ──
 // （此前没设 BDP_CONFIG_DIR —— 结果 pcsPath 取决于本机配置，测试不确定。）
-const TMP_CFG = fs.mkdtempSync(path.join(os.tmpdir(), "bdp-dryrun-cfg-"));
+const TMP_CFG = makeTempDir("bdp-dryrun-cfg-", { scope: "file" });
 process.env.BDP_CONFIG_DIR = TMP_CFG;
 fs.writeFileSync(
   path.join(TMP_CFG, "config.json"),
@@ -89,7 +89,7 @@ test.after(() => {
 // 回归自：dry-run 判定排在「目录 → 回退引擎」之后 → bdp get <目录> --dry-run
 // 会真的把整个目录下载下来（实测 47MB）
 test("pan: get <目录> --dry-run 不落盘，也不触发引擎下载", async () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "bdp-dryrun-"));
+  const tmp = makeTempDir("bdp-dryrun-");
   try {
     const r = await pan.download("/dir", tmp, { dryRun: true });
     assert.equal(r.dryRun, true);

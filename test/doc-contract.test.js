@@ -12,8 +12,8 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
-const os = require("node:os");
 const { spawnSync } = require("node:child_process");
+const { makeTempDir } = require("./tmp-helper");
 
 const ROOT = path.join(__dirname, "..");
 const SKILL_DIR = path.join(ROOT, "skills", "baiduwangpan");
@@ -34,7 +34,7 @@ function read(p) {
 }
 
 // ── 隔离配置：本测试绝不能碰用户的 ~/.bdp/config.json ──────────────────
-const TMP_CFG = fs.mkdtempSync(path.join(os.tmpdir(), "bdp-contract-"));
+const TMP_CFG = makeTempDir("bdp-contract-", { scope: "file" });
 process.env.BDP_CONFIG_DIR = TMP_CFG;
 fs.writeFileSync(
   path.join(TMP_CFG, "config.json"),

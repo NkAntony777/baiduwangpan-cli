@@ -1,15 +1,15 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
-const os = require("node:os");
 const path = require("node:path");
 const { EventEmitter } = require("node:events");
 const { PassThrough } = require("node:stream");
+const { makeTempDir } = require("./tmp-helper");
 
 // ── 隔离配置：写临时 BDP_CONFIG_DIR，pcsPath 指向 mock 认得的名字 ──
 // （与 test/pan.test.js 同一手法：pcsPath 必须是 "BaiduPCS-Go"，
 //   mock 才会拦截；写绝对路径会被 mock 放行给真实引擎）
-const TMP_CFG = fs.mkdtempSync(path.join(os.tmpdir(), "bdp-async-cfg-"));
+const TMP_CFG = makeTempDir("bdp-async-cfg-", { scope: "file" });
 process.env.BDP_CONFIG_DIR = TMP_CFG;
 fs.writeFileSync(
   path.join(TMP_CFG, "config.json"),

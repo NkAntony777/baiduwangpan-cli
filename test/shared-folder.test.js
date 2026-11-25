@@ -1,13 +1,13 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs/promises");
-const os = require("node:os");
 const path = require("node:path");
 const crypto = require("node:crypto");
 const { spawnSync } = require("node:child_process");
 const http = require("../lib/http");
 const config = require("../lib/config");
 const shared = require("../lib/shared-folder");
+const { makeTempDir } = require("./tmp-helper");
 const CLI = path.join(__dirname, "..", "bin", "bdp.js");
 const ROOT = "/<share>123-456";
 const original = { webJson: http.webJson, getBdstoken: http.getBdstoken, spawnCollected: http.spawnCollected,
@@ -38,7 +38,7 @@ function fixture(url, options) {
 test.beforeEach(async () => {
   calls = [];
   responder = fixture;
-  temp = await fs.mkdtemp(path.join(os.tmpdir(), "bdp-shared-test-"));
+  temp = makeTempDir("bdp-shared-test-");
   http.getBdstoken = async () => "test-token";
   http.webJson = async (raw, options = {}) => {
     const url = new URL(raw);

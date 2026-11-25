@@ -8,14 +8,14 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
-const os = require("node:os");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
+const { makeTempDir } = require("./tmp-helper");
 
 const BDP_JS = path.join(__dirname, "..", "bin", "bdp.js");
 
 function withCfg(fn) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "bdp-flag-guard-"));
+  const dir = makeTempDir("bdp-flag-guard-");
   try {
     return fn(dir);
   } finally {

@@ -13,6 +13,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
+require("./tmp-helper");
 
 const SCRIPT = path.join(__dirname, "..", "scripts", "bench-concurrency.js");
 

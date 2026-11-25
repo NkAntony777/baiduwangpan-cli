@@ -2,6 +2,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const { spawnSync } = require("child_process");
 const path = require("path");
+require("./tmp-helper");
 
 // bdp.js 是 CLI 脚本（加载即执行 main），测试用子进程方式调用
 const BDP = process.execPath;

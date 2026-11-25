@@ -2,6 +2,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 
 const { parseChcp } = require("../lib/console");
+require("./tmp-helper");
 
 test("parseChcp: 英文格式 Active code page: 936", () => {
   assert.equal(parseChcp("Active code page: 936"), 936);

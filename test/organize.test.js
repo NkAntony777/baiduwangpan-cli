@@ -1,6 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const organize = require("../lib/organize");
+require("./tmp-helper");
 
 test("organize: extOfName 取小写扩展名", () => {
   assert.equal(organize.extOfName("a.PDF"), "pdf");

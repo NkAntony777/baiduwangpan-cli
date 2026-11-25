@@ -2,6 +2,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const path = require("node:path");
 const { defaultPartialFile, buildPartialPayload } = require("../lib/partial");
+require("./tmp-helper");
 
 test("defaultPartialFile generates a safe filename in cwd", () => {
   const f = defaultPartialFile("539478953581833690", "玄空飞星", {

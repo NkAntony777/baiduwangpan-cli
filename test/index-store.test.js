@@ -1,13 +1,13 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const store = require("../lib/index-store");
-const os = require("os");
 const path = require("path");
 const fs = require("fs");
+const { makeTempDir } = require("./tmp-helper");
 
 let dbPath;
 function tmpDb() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "bdp-idx-"));
+  const dir = makeTempDir("bdp-idx-");
   return path.join(dir, "test.db");
 }
 
@@ -53,7 +53,7 @@ test("buildMatchQuery: FTS5 关键字被引号包裹成字面量（不会触发�
 });
 
 test("search: 特殊字符查询不抛异常（走 fallback）", () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "bdp-idx-"));
+  const dir = makeTempDir("bdp-idx-");
   const h = store.openIndex(path.join(dir, "t.db"));
   try {
     store.upsertFile(h, { path: "/a.txt", name: "a.txt", content: "甘草内容" });
@@ -206,7 +206,7 @@ test("索引: 目录前缀过滤生效", () => {
 // ── schema 迁移 ─────────────────────────────────────────
 test("索引: 旧版外部内容表结构会被自动重建", () => {
   const { DatabaseSync } = require("node:sqlite");
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "bdp-idx-"));
+  const dir = makeTempDir("bdp-idx-");
   const p = path.join(dir, "old.db");
   const old = new DatabaseSync(p);
   old.exec(

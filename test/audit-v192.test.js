@@ -1,14 +1,14 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
-const os = require("node:os");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
+const { makeTempDir, TMP_ROOT: TMP_BASE } = require("./tmp-helper");
 
 const BDP_JS = path.join(__dirname, "..", "bin", "bdp.js");
 
 // 关键：配置目录指向临时目录 —— 本文件会跑 --profile，绝不能碰用户的真实配置
-const CFG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "bdp-env-v192-"));
+const CFG_DIR = makeTempDir("bdp-env-v192-", { scope: "file" });
 process.env.BDP_CONFIG_DIR = CFG_DIR;
 
 const errorCodes = require("../lib/error-codes");
@@ -17,7 +17,7 @@ const mcp = require("../lib/mcp");
 
 test.after(() => {
   const resolved = path.resolve(CFG_DIR);
-  assert.ok(resolved.indexOf(path.resolve(os.tmpdir())) === 0);
+  assert.ok(resolved.indexOf(path.resolve(TMP_BASE)) === 0);
   fs.rmSync(resolved, { recursive: true, force: true });
 });
 
@@ -249,7 +249,7 @@ test("flags.safeString: 无法转字符串的值不抛异常", () => {
 
 // ── 审核发现 8：--profile 的取值校验 ───────────────────────────
 test("CLI: --profile 后面跟选项名时报错，且不建出垃圾 profile", () => {
-  const localCfg = fs.mkdtempSync(path.join(os.tmpdir(), "bdp-prof-guard-"));
+  const localCfg = makeTempDir("bdp-prof-guard-");
   try {
     const run = (args) =>
       spawnSync(process.execPath, [BDP_JS].concat(args), {

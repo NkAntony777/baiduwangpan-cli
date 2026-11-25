@@ -3,6 +3,7 @@ const assert = require("node:assert/strict");
 const { spawn } = require("child_process");
 const path = require("path");
 const { toolDefs, PROTOCOL_VERSION, SERVER_NAME } = require("../lib/mcp");
+require("./tmp-helper");
 
 const BDP_JS = path.join(__dirname, "..", "bin", "bdp.js");
 

@@ -5,6 +5,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const nodeHttp = require("node:http");
 const libHttp = require("../lib/http");
+require("./tmp-helper");
 
 test("http: 挂起的请求会在超时后中止（不会永久挂起 + 烧满 CPU）", async () => {
   const server = nodeHttp.createServer(() => {

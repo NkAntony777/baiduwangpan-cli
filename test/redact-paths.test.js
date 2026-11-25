@@ -8,15 +8,15 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
-const os = require("node:os");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
 
 const { redactLocalPaths, sanitizeErrorMessage } = require("../lib/sanitize");
+const { makeTempDir } = require("./tmp-helper");
 
 // ── 隔离环境：含空格的假引擎绝对路径 + 隔离配置目录 ──────────────────
 // （真实场景就是 `C:\Program Files\BaiduPCS-Go\BaiduPCS-Go.exe`）
-const TMP_ROOT = fs.mkdtempSync(path.join(os.tmpdir(), "bdp-redact-"));
+const TMP_ROOT = makeTempDir("bdp-redact-", { scope: "file" });
 const ENGINE_DIR = path.join(TMP_ROOT, "Program Files", "BaiduPCS-Go");
 fs.mkdirSync(ENGINE_DIR, { recursive: true });
 const FAKE_ENGINE = path.join(ENGINE_DIR, "BaiduPCS-Go.exe");

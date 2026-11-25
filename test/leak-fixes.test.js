@@ -4,6 +4,7 @@ const path = require("node:path");
 
 const errorCodes = require("../lib/error-codes");
 const { withMeta } = require("../lib/console");
+require("./tmp-helper");
 
 // ── V-05 / V-06：未登记码的原样回显是反射注入面 ──
 test("错误码: 未登记码回显要中和边界标记与控制字符", () => {

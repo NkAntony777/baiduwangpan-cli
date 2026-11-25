@@ -1,6 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const { safeDownloadName } = require("../lib/group");
+require("./tmp-helper");
 
 test("群文件下载名只留最后一段，.. 和斜杠写不出目录", () => {
   assert.equal(safeDownloadName("报告.pdf", "fallback"), "报告.pdf");
