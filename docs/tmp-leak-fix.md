@@ -289,6 +289,10 @@ powershell -ExecutionPolicy Bypass -File scripts\sync-global.ps1
 ✅ 通过：全量跑完系统 TEMP 没有新增任何 bdp-* 目录
 ```
 
+> 那 59 个是**改前**的原代码跑出来的历史残留（都在 6h 内 ⇒ 清扫按规矩不碰「新鲜」的）。
+> 本轮已把它们连同基线对比跑产生的残留一并清掉 ⇒ **当前系统 TEMP 的 `bdp-*` 计数 = 0**；
+> 再跑一次全量仍是 **0 → 0，增量 0**。
+
 ### 8.6 残留与边界（如实记录）
 
 - **`test/bench-concurrency.test.js` 的「曲线下降」断言在满载并行下会偶发翻转** ——
